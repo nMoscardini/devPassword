@@ -1,0 +1,16 @@
+# Build output
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+logs/
+
+# Never commit real data (N1)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.dpbackup
+*.csv
+~$*
+.DS_Store
