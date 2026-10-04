@@ -4,7 +4,7 @@ Authoritative state document (devDesign principle 9). Update at the end of every
 
 ## Status
 
-Class Personal. Stage 1 (local vault, Mac). Source written 3 October 2026. Build and tests: see Last verified.
+Class: Personal. Version: 0.1. Stage 1 (local vault, Mac) working and in daily trial with test data: Touch ID, import, backup, appearance settings. Not yet trusted with real records (see Open items).
 
 ## What it is
 
@@ -26,6 +26,7 @@ A password and personal-records manager for Nino's Mac and iPhone, with an encry
 | 2026-10-03 | Simplified record and sync model | Principles 2 and 6 | 0001 |
 | 2026-10-03 | Stage 1 app runs from the package, passphrase unlock only | Stage 0 has not proved signing or Keychain | 0002 |
 | 2026-10-03 | Stage 1 restore keeps the vault ID | No cloud copy yet | 0003 |
+| 2026-10-04 | Act on ChatGPT security review; AI review accepted in place of a human expert | No human reviewer available | 0005 |
 | 2026-10-03 | Touch ID via signed Xcode app, Keychain-held key | Nino asked; spec F10 | 0004 |
 | 2026-10-03 | Record types: login, secure note, payment card, bank account, identity document, plus custom fields | Spec v1.1 | - |
 
@@ -37,11 +38,13 @@ A password and personal-records manager for Nino's Mac and iPhone, with an encry
 - Backup register row in `~/devDesign/REFERENCE_ARCHITECTURE.md`. Add once the destination is known.
 - Sample CSV exports from LastPass and mSecure (synthetic or a few dummy records) to tune the importer's column guesses.
 - KDF work factor confirmed against the benchmark on the slowest device (iPhone) in Stage 0.
-- Independent security review of `VaultCore` before real records go in. Who and when: Nino to decide.
+- Security review: done by ChatGPT on 4 October (decision 0005), fixes applied. Still to do: a second AI pass on the fixed code, and a review of the UI layer.
 - N6 note before any other person's documents enter the vault.
-- Put the project in git. `.gitignore` is ready.
 
 ## Known problems
+
+- Old record versions could be swapped back in by something with write access to the vault as Nino's user (review finding 6). Accepted for Stage 1.
+- Encrypted backups made before a passphrase or recovery code change still open with the old secret. The app says so. Delete old backups if a secret is compromised.
 
 - Swift `String` values cannot be zeroed. Decrypted records sit in memory while unlocked and are released on lock. As the spec says, no guarantee of erasure.
 - No sandbox (decision 0002). The vault file is readable by any process running as Nino. It holds ciphertext only.
@@ -60,12 +63,14 @@ See README.md.
 
 ## Last verified
 
-2026-10-03 17:24: build passed; 4 of 31 tests FAILED (snapshot check and CSV CRLF quoting). Earlier report of a pass was wrong: only the log tail was read. Both fixed, re-run pending. Smoke test on 1,000 synthetic records: search 3 ms. KDF 600,000 iterations: 84 ms on the Mac Studio.
+2026-10-04: `scripts/smoke.sh` printed SMOKE PASSED after the security review fixes: 36 tests, 0 failures, including hostile work factor, export needs passphrase, owner-only files and snapshots removed after a credential change. Earlier: signed app built and run in Xcode by Nino with test data; Touch ID enable, unlock, cancel and wrong finger checked.
 
-Not verified: the Mac app's screens by a person; the importer on real export files; KDF timing on iPhone.
+Not verified: Touch ID after a fingerprint change; importer on real LastPass or mSecure export files; restore drill from an off-site copy.
 
 ## Session log
 
+- 2026-10-04: Security review (ChatGPT) received. Fixed findings 1 to 4 and file permissions; 5 and 6 accepted. Decision 0005. New tests: hostile work factor, export needs passphrase, owner-only files, snapshots removed after credential change.
+- 2026-10-03: Project in git (github.com/nMoscardini/devPassword, first commit pushed). Picked up automatically by devGitStatus and devProjectStatus. Version set to 0.1.
 - 2026-10-03: Settings moved from SwiftUI Settings scene (fixed size) to a normal resizable window, 760 by 680 default, 600 by 480 minimum. Command-comma unchanged.
 - 2026-10-03: Lock screen colour added to Appearance. Padlock app icon (original design, generated) added to the signed app.
 - 2026-10-03: Settings > Appearance: colour for each of the three panes, or System. Stored per Mac in UserDefaults.

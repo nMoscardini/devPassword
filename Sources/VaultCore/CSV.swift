@@ -73,14 +73,15 @@ public enum CSV {
 
 /// devPassword's own CSV format: one file, a type column, every field and custom field.
 /// Plaintext. For migration away from this app only.
-public enum CSVExport {
-    public static let fixedColumns = ["type", "title", "urls", "tags", "favourite", "notes", "notes_concealed", "custom_fields"]
+/// Internal: callers outside this module must use Vault.exportPlaintextCSV(passphrase:).
+enum CSVExport {
+    static let fixedColumns = ["type", "title", "urls", "tags", "favourite", "notes", "notes_concealed", "custom_fields"]
 
-    public static var fieldColumns: [String] {
+    static var fieldColumns: [String] {
         RecordType.allCases.flatMap { $0.fieldDefs.map { "field:" + $0.key } }
     }
 
-    public static func make(_ entries: [Entry]) throws -> String {
+    static func make(_ entries: [Entry]) throws -> String {
         let header = fixedColumns + fieldColumns
         var rows: [[String]] = [header]
         let encoder = JSONEncoder()

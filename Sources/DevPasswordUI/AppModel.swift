@@ -42,6 +42,7 @@ final class AppModel: ObservableObject {
     static let expiringDays = 90
 
     init() {
+        _ = umask(0o077)   // every file this app creates is owner-only
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("devPassword", isDirectory: true)
         vaultURL = support.appendingPathComponent("vault.sqlite")
@@ -345,7 +346,7 @@ final class AppModel: ObservableObject {
         defer { busy = false }
         do {
             try await Task.detached { try vault.changePassphrase(current: current, new: new) }.value
-            infoMessage = "Passphrase changed. Older backups still open with the old passphrase until you make a new one."
+            infoMessage = "Passphrase changed. Local snapshots made with the old passphrase were removed. Encrypted backups made before today still open with the OLD passphrase: make a new backup now, and delete older ones if you think the old passphrase is known to anyone."
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -363,7 +364,7 @@ final class AppModel: ObservableObject {
         guard let vault else { return false }
         do {
             try vault.commitRecoveryCode(pending)
-            infoMessage = "New recovery code is active. The old one no longer opens this vault, but still opens backups made before today."
+            infoMessage = "New recovery code is active. Local snapshots made with the old code were removed. Encrypted backups made before today still open with the OLD code: make a new backup now, and delete older ones if the old code may have been seen."
             return true
         } catch {
             errorMessage = "The recovery code was not changed. \(error.localizedDescription)"
@@ -418,17 +419,16 @@ final class AppModel: ObservableObject {
     }
 
     func exportCSV(passphrase: String, to url: URL) -> Bool {
-        guard let vault, vault.verify(passphrase: passphrase) else {
+        guard let vault else { return false }
+        do {
+            let result = try vault.exportPlaintextCSV(passphrase: passphrase)
+            try Data(result.csv.utf8).write(to: url, options: [.atomic])
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            infoMessage = "Exported \(result.count) items. This file is not encrypted. Delete it when you are done."
+            return true
+        } catch VaultError.wrongSecret {
             errorMessage = "That passphrase is not correct."
             return false
-        }
-        do {
-            let text = try CSVExport.make(entries)
-            try Data(text.utf8).write(to: url, options: [.atomic])
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            vault.audit("export.plaintext_csv")
-            infoMessage = "Exported \(entries.filter { !$0.isDeleted }.count) items. This file is not encrypted. Delete it when you are done."
-            return true
         } catch {
             errorMessage = error.localizedDescription
             return false

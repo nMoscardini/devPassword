@@ -81,9 +81,13 @@ final class VaultTests: XCTestCase {
         v.lock()
         try v.unlock(passphrase: "another good passphrase")
 
-        let snaps = try FileManager.default.contentsOfDirectory(atPath: v.snapshotsDirectory.path)
-        XCTAssertEqual(snaps.filter { $0.hasSuffix(".sqlite") }.count, 2, "Snapshot before each secret change (N3)")
+        // Snapshots hold the old wrapped key, so they are removed once a change succeeds (review finding 3).
+        let snaps = (try? FileManager.default.contentsOfDirectory(atPath: v.snapshotsDirectory.path)) ?? []
+        XCTAssertTrue(snaps.filter { $0.hasPrefix("vault-") }.isEmpty)
         XCTAssertTrue(v.auditLog().contains { $0.action == "vault.passphrase_changed" })
+        XCTAssertTrue(v.auditLog().contains { $0.action == "snapshots.retired_after_credential_change" })
+        // A low test work factor is raised to the baseline when the passphrase changes (finding 1).
+        XCTAssertEqual(v.header.kdfIterations, VaultCrypto.defaultIterations)
     }
 
     func testPreparedRecoveryCodeChangesNothingUntilCommitted() throws {
@@ -99,6 +103,44 @@ final class VaultTests: XCTestCase {
         let v2 = try Vault.open(at: dir.appendingPathComponent("vault.sqlite"))
         XCTAssertThrowsError(try v2.unlock(recoveryCode: oldCode))
         try v2.unlock(recoveryCode: pending.code)
+    }
+
+    func testOldSnapshotsDoNotSurviveCredentialChange() throws {
+        let (vault, _) = try makeVault()
+        try vault.saveAll(sampleEntries())
+        try vault.purge(id: try vault.loadAll().entries[0].id)   // leaves a snapshot under the old passphrase
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: vault.snapshotsDirectory.path).isEmpty)
+        try vault.changePassphrase(current: testPassphrase, new: "another good passphrase")
+        let left = try FileManager.default.contentsOfDirectory(atPath: vault.snapshotsDirectory.path)
+        XCTAssertTrue(left.filter { $0.hasPrefix("vault-") }.isEmpty)
+    }
+
+    func testHostileWorkFactorRejected() {
+        XCTAssertThrowsError(try VaultCrypto.deriveKey(passphrase: "x", salt: Data("salt".utf8),
+                                                       iterations: VaultCrypto.maximumIterations + 1))
+        XCTAssertThrowsError(try VaultCrypto.deriveKey(passphrase: "x", salt: Data("salt".utf8), iterations: 0))
+    }
+
+    func testPlaintextExportNeedsPassphrase() throws {
+        let (vault, _) = try makeVault()
+        try vault.saveAll(sampleEntries())
+        XCTAssertThrowsError(try vault.exportPlaintextCSV(passphrase: "wrong wrong wrong")) { e in
+            XCTAssertEqual(e as? VaultError, .wrongSecret)
+        }
+        let result = try vault.exportPlaintextCSV(passphrase: testPassphrase)
+        XCTAssertEqual(result.count, 5)
+        XCTAssertTrue(vault.auditLog().contains { $0.action == "export.plaintext_csv" })
+    }
+
+    func testVaultFilesAreOwnerOnly() throws {
+        let dir = tempDir()
+        let (vault, _) = try makeVault(in: dir)
+        try vault.saveAll(sampleEntries())
+        let base = dir.appendingPathComponent("vault.sqlite").path
+        for p in [base, base + "-wal", base + "-shm"] where FileManager.default.fileExists(atPath: p) {
+            let mode = (try FileManager.default.attributesOfItem(atPath: p)[.posixPermissions] as? NSNumber)?.intValue
+            XCTAssertEqual(mode, 0o600, "\(p) should be owner-only")
+        }
     }
 
     func testTamperedRecordIsReportedNotShown() throws {

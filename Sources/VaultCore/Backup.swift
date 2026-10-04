@@ -148,6 +148,7 @@ public enum Backup {
         let staging = URL(fileURLWithPath: url.path + ".restoring")
         for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: staging.path + suffix) }
 
+        FilePermissions.createPrivateFile(staging.path)
         let db = try SQLiteDB(path: staging.path)
         try Vault.createSchema(db)
         try db.transaction {
@@ -171,7 +172,7 @@ public enum Backup {
         }
         try fm.moveItem(at: staging, to: url)
         for suffix in ["-wal", "-shm"] { try? fm.removeItem(atPath: staging.path + suffix) }
-        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        FilePermissions.tighten(url.path)
         Log.backup.info("event=backup.restored count=\(opened.archive.entries.count, privacy: .public)")
     }
 

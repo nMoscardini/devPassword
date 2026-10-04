@@ -40,8 +40,12 @@ public final class Vault: @unchecked Sendable {
     }
 
     /// Creates a new vault and returns it unlocked, with the recovery code to show once.
-    public static func create(at url: URL, passphrase: String,
-                              iterations: Int = VaultCrypto.defaultIterations) throws -> (vault: Vault, recoveryCode: String) {
+    public static func create(at url: URL, passphrase: String) throws -> (vault: Vault, recoveryCode: String) {
+        try create(at: url, passphrase: passphrase, iterations: VaultCrypto.defaultIterations)
+    }
+
+    /// Internal so only this module and its tests can choose the work factor (security review finding 1).
+    static func create(at url: URL, passphrase: String, iterations: Int) throws -> (vault: Vault, recoveryCode: String) {
         try PassphrasePolicy.validate(passphrase)
         guard !exists(at: url) else { throw VaultError.alreadyExists }
         let dir = url.deletingLastPathComponent()
@@ -55,10 +59,11 @@ public final class Vault: @unchecked Sendable {
         try header.wrap(vaultKey, passphrase: passphrase, newSalt: false)
         try header.wrap(vaultKey, recoverySecret: recovery.secret, newSalt: false)
 
+        FilePermissions.createPrivateFile(url.path)
         let db = try SQLiteDB(path: url.path)
         try createSchema(db)
         try writeHeader(header, to: db)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        FilePermissions.tighten(url.path)
 
         let vault = Vault(fileURL: url, db: db, header: header)
         vault.key = vaultKey
@@ -70,7 +75,9 @@ public final class Vault: @unchecked Sendable {
     /// Opens an existing vault, locked.
     public static func open(at url: URL) throws -> Vault {
         guard exists(at: url) else { throw VaultError.notFound }
+        FilePermissions.tighten(url.path)
         let db = try SQLiteDB(path: url.path)
+        FilePermissions.tighten(url.path)
         let version = db.userVersion
         guard version != 0 else { throw VaultError.corrupt("Not a devPassword vault") }
         guard version <= schemaVersion else { throw VaultError.unsupportedVersion(version) }
@@ -286,12 +293,19 @@ public final class Vault: @unchecked Sendable {
     private func rewrapPassphrase(_ vaultKey: SymmetricKey, new: String) throws {
         try snapshot(reason: "passphrase-change")
         var updated = header
+        // Never keep a work factor below the current baseline once the passphrase changes.
+        updated.kdfIterations = max(updated.kdfIterations, VaultCrypto.defaultIterations)
         try updated.wrap(vaultKey, passphrase: new, newSalt: true)
+        // Prove the new wrapper opens the same key before saving it.
+        guard VaultCrypto.keyData(try updated.unwrap(passphrase: new)) == VaultCrypto.keyData(vaultKey) else {
+            throw VaultError.crypto("The new passphrase did not verify. Nothing was changed.")
+        }
         try db.transaction { try Vault.writeHeader(updated, to: db) }
         header = updated
         key = vaultKey
         audit("vault.passphrase_changed")
         Log.vault.info("event=vault.passphrase_changed")
+        retireSnapshotsAfterCredentialChange()
     }
 
     /// Step 1 of replacing the recovery code: make a new code. Changes nothing.
@@ -308,10 +322,42 @@ public final class Vault: @unchecked Sendable {
         try snapshot(reason: "recovery-change")
         var updated = header
         try updated.wrap(vaultKey, recoverySecret: pending.secret, newSalt: true)
+        guard VaultCrypto.keyData(try updated.unwrap(recoveryCode: pending.code)) == VaultCrypto.keyData(vaultKey) else {
+            throw VaultError.crypto("The new recovery code did not verify. Nothing was changed.")
+        }
         try db.transaction { try Vault.writeHeader(updated, to: db) }
         header = updated
         audit("vault.recovery_code_replaced")
         Log.vault.info("event=vault.recovery_code_replaced")
+        retireSnapshotsAfterCredentialChange()
+    }
+
+    /// Security review finding 3. Every local snapshot holds the key wrapped under the OLD
+    /// passphrase or recovery code. Once the new one is saved and verified, remove them all so
+    /// the old secret no longer opens anything on this Mac. The snapshot taken just before the
+    /// change has done its job (N3): the change succeeded. Encrypted backups elsewhere are not
+    /// touched; the app tells the user to make a fresh one.
+    /// Deleting on an SSD does not guarantee erasure; FileVault covers what remains.
+    private func retireSnapshotsAfterCredentialChange() {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: snapshotsDirectory.path) else { return }
+        var removed = 0
+        for name in names where name.hasPrefix("vault-") {
+            if (try? fm.removeItem(at: snapshotsDirectory.appendingPathComponent(name))) != nil { removed += 1 }
+        }
+        audit("snapshots.retired_after_credential_change")
+        Log.vault.info("event=snapshots.retired count=\(removed, privacy: .public)")
+    }
+
+    /// Plaintext CSV of every record, only after the passphrase is re-entered (security review finding 4).
+    /// Keep the returned string for as short a time as possible.
+    public func exportPlaintextCSV(passphrase: String) throws -> (csv: String, count: Int) {
+        guard verify(passphrase: passphrase) else { throw VaultError.wrongSecret }
+        let entries = try loadAll().entries.filter { !$0.isDeleted }
+        let csv = try CSVExport.make(entries)
+        audit("export.plaintext_csv")
+        Log.vault.info("event=export.plaintext_csv count=\(entries.count, privacy: .public)")
+        return (csv, entries.count)
     }
 
     /// Both steps at once. Tests only: the app must always confirm before committing.
@@ -336,8 +382,9 @@ public final class Vault: @unchecked Sendable {
                                attributes: [.posixPermissions: 0o700])
         let stamp = Vault.timestamp()
         let dest = snapshotsDirectory.appendingPathComponent("vault-\(stamp)-\(reason).sqlite")
+        FilePermissions.createPrivateFile(dest.path)
         try db.backup(to: dest.path)
-        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dest.path)
+        FilePermissions.tighten(dest.path)
         let check = try SQLiteDB(path: dest.path, readOnly: true)
         let ok = (try? Vault.readHeader(from: check)) != nil
         check.close()

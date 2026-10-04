@@ -19,6 +19,9 @@ public struct SecureRandom: RandomNumberGenerator {
 public enum VaultCrypto {
     /// OWASP baseline for PBKDF2-HMAC-SHA256. Stage 0 benchmarks and confirms it.
     public static let defaultIterations = 600_000
+    /// Upper bound accepted from any vault or backup header. Stops a hostile or damaged file
+    /// from hanging the app (security review finding 2).
+    public static let maximumIterations = 10_000_000
 
     public static func randomBytes(_ count: Int) -> Data {
         var data = Data(count: count)
@@ -34,7 +37,9 @@ public enum VaultCrypto {
     public static func deriveKey(passphrase: String, salt: Data, iterations: Int) throws -> SymmetricKey {
         let password = Array(passphrase.precomposedStringWithCanonicalMapping.utf8)
         guard !password.isEmpty else { throw VaultError.wrongSecret }
-        guard iterations > 0, !salt.isEmpty else { throw VaultError.crypto("Invalid key derivation parameters") }
+        guard iterations > 0, iterations <= maximumIterations, !salt.isEmpty else {
+            throw VaultError.corrupt("Key derivation settings are out of range")
+        }
         let saltBytes = [UInt8](salt)
         var derived = [UInt8](repeating: 0, count: 32)
         let status: Int32 = password.withUnsafeBufferPointer { pw in
