@@ -8,14 +8,14 @@ struct NewPassphraseFields: View {
 
     static func problem(_ a: String, _ b: String) -> String? {
         if let p = PassphrasePolicy.problem(a) { return p }
-        if a != b { return "The two passphrases do not match." }
+        if a != b { return "The two passwords do not match." }
         return nil
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SecureField("New master passphrase", text: $first)
-            SecureField("Repeat passphrase", text: $second)
+            SecureField("New vault password", text: $first)
+            SecureField("Repeat vault password", text: $second)
             if !first.isEmpty, let p = NewPassphraseFields.problem(first, second) {
                 Text(p).font(.callout).foregroundStyle(.orange)
             }
@@ -32,7 +32,7 @@ struct SetupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Create your vault", systemImage: "lock.shield").font(.largeTitle.bold())
-            Text("Choose a master passphrase. It encrypts everything in the vault. Nobody can reset it, so pick one you will remember. Four or more random words works well.")
+            Text("Choose a vault password. It encrypts everything in the vault. Nobody can reset it, so pick one you will remember. Four or more random words works well.")
                 .foregroundStyle(.secondary)
             Text("Next you will get a recovery code. It is the only other way in.")
                 .foregroundStyle(.secondary)
@@ -77,7 +77,7 @@ struct RecoveryCodeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Label("Your recovery code", systemImage: "key.viewfinder").font(.largeTitle.bold())
-                Text("Write this down on paper and keep it somewhere safe, away from this Mac and away from your backups. With your passphrase forgotten, this code is the only way back in. It is shown once.")
+                Text("Write this down on paper and keep it somewhere safe, away from this Mac and away from your backups. With your vault password forgotten, this code is the only way back in. It is shown once.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 VStack(alignment: .leading, spacing: 8) {
@@ -151,17 +151,13 @@ struct UnlockView: View {
         VStack(spacing: 18) {
             Image(systemName: "lock.fill").font(.system(size: 44)).foregroundStyle(.secondary)
             Text("devPassword is locked").font(.title.bold())
-            Group {
-                if useRecovery {
-                    TextField("Recovery code", text: $secret)
-                        .font(.system(.body, design: .monospaced))
-                } else {
-                    SecureField("Master passphrase", text: $secret)
-                }
+            if let notice = model.lockNotice {
+                Label(notice, systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
             }
-            .textFieldStyle(.roundedBorder)
-            .frame(width: 380)
-            .onSubmit(unlock)
+            SecretField(placeholder: useRecovery ? "Recovery code" : "Vault password",
+                        text: $secret, monospaced: useRecovery, onSubmit: unlock)
+                .frame(width: 380)
             if useRecovery {
                 CodeProgress(typed: secret, ok: (try? RecoveryCode.parse(secret)) != nil)
                     .frame(width: 380, alignment: .leading)
@@ -177,7 +173,7 @@ struct UnlockView: View {
                 .disabled(model.busy)
             }
             HStack {
-                Button(useRecovery ? "Use passphrase" : "Forgot passphrase? Use recovery code") {
+                Button(useRecovery ? "Use vault password" : "Forgot vault password? Use recovery code") {
                     useRecovery.toggle()
                     secret = ""
                 }
@@ -215,15 +211,15 @@ struct NewPassphraseView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Set a new passphrase").font(.largeTitle.bold())
-            Text("You opened the vault with your recovery code. Choose a new master passphrase. Your recovery code keeps working.")
+            Text("Set a new vault password").font(.largeTitle.bold())
+            Text("You opened the vault with your recovery code. Choose a new vault password. Your recovery code keeps working.")
                 .foregroundStyle(.secondary)
             NewPassphraseFields(first: $p1, second: $p2)
             HStack {
                 Button("Lock") { model.lockManually() }
                 Spacer()
                 if model.busy { ProgressView().controlSize(.small) }
-                Button("Set Passphrase") {
+                Button("Set Vault Password") {
                     let p = p1
                     Task { await model.setNewPassphrase(p) }
                 }
@@ -233,5 +229,36 @@ struct NewPassphraseView: View {
         }
         .padding(40)
         .frame(maxWidth: 560)
+    }
+}
+
+/// A secret entry box: hidden by default, with an eye button to show it while typing.
+/// Used for passphrases and recovery codes, so neither appears on screen by accident.
+struct SecretField: View {
+    let placeholder: String
+    @Binding var text: String
+    var monospaced = false
+    var onSubmit: () -> Void = {}
+    @State private var shown = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Group {
+                if shown {
+                    TextField(placeholder, text: $text)
+                } else {
+                    SecureField(placeholder, text: $text)
+                }
+            }
+            .font(monospaced ? .body.monospaced() : .body)
+            .textFieldStyle(.roundedBorder)
+            .onSubmit(onSubmit)
+            Button { shown.toggle() } label: {
+                Image(systemName: shown ? "eye.slash" : "eye")
+            }
+            .buttonStyle(.borderless)
+            .help(shown ? "Hide" : "Show while typing")
+        }
+        .onDisappear { shown = false }
     }
 }

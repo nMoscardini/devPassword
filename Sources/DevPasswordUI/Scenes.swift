@@ -38,6 +38,7 @@ public struct DevPasswordScenes: Scene {
                 Button("Back Up Now") { model.backupNow() }
                     .keyboardShortcut("b", modifiers: [.command, .shift])
                     .disabled(!model.isUnlocked)
+                RestoreMenuButton(model: model)
             }
         }
 
@@ -86,5 +87,19 @@ struct SettingsMenuButton: View {
     var body: some View {
         Button("Settings…") { openWindow(id: "settings") }
             .keyboardShortcut(",", modifiers: [.command])
+    }
+}
+
+/// Vault > Restore from Backup… opens the restore steps over the main window.
+struct RestoreMenuButton: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Restore from Backup…") {
+            openWindow(id: "main")
+            model.showRestore = true
+        }
+        .disabled(!model.isUnlocked)
     }
 }

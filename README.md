@@ -44,9 +44,9 @@ Settings > Backup > choose a folder, then Back Up Now. Weekly backups run on unl
 
 ## Recover
 
-- Forgot the passphrase: on the lock screen choose "Use recovery code", then set a new passphrase.
-- Vault file lost or damaged: Settings > Backup > Restore. Opens with the passphrase current when the backup was made, or the recovery code. The current vault is kept beside the restored one, never deleted.
-- Lost both passphrase and recovery code: there is no way back. That is the design.
+- Forgot the vault password: on the lock screen choose "Use recovery code", then set a new vault password.
+- Vault file lost or damaged: Settings > Backup > Restore. Opens with the vault password current when the backup was made, or the recovery code. The current vault is kept beside the restored one, never deleted.
+- Lost both vault password and recovery code: there is no way back. That is the design.
 
 ## Update
 
@@ -54,6 +54,6 @@ Pull the source, run `scripts/smoke.sh`, then run the app. Back up first (N3). S
 
 ## Rules for working on this project
 
-- Never put a real vault, CSV export, passphrase or recovery code into an AI session, a log, a test, or git (N1).
+- Never put a real vault, CSV export, vault password or recovery code into an AI session, a log, a test, or git (N1).
 - Synthetic data in tests only.
 - Plaintext CSV exports stay out of cloud folders and get deleted after use.

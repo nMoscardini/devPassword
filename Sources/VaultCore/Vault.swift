@@ -128,9 +128,9 @@ public final class Vault: @unchecked Sendable {
     public func unlock(passphrase: String) throws {
         do {
             key = try header.unwrap(passphrase: passphrase)
-            Log.vault.info("event=vault.unlocked method=passphrase")
+            Log.vault.info("event=vault.unlocked method=password")
         } catch {
-            Log.vault.notice("event=vault.unlock_failed method=passphrase")
+            Log.vault.notice("event=vault.unlock_failed method=password")
             throw error
         }
     }
@@ -172,7 +172,7 @@ public final class Vault: @unchecked Sendable {
         if let first = try allSealed().first, (try? Vault.decryptEntry(first, key: candidate, header: header)) == nil {
             BiometricUnlock.remove(header: header)
             Log.vault.error("event=vault.biometric_key_mismatch")
-            throw VaultError.biometricUnavailable("The key stored for Touch ID does not open this vault. It has been removed. Unlock with your passphrase.")
+            throw VaultError.biometricUnavailable("The key stored for Touch ID does not open this vault. It has been removed. Unlock with your vault password.")
         }
         key = candidate
         Log.vault.info("event=vault.unlocked method=biometric")
@@ -291,20 +291,20 @@ public final class Vault: @unchecked Sendable {
     }
 
     private func rewrapPassphrase(_ vaultKey: SymmetricKey, new: String) throws {
-        try snapshot(reason: "passphrase-change")
+        try snapshot(reason: "password-change")
         var updated = header
         // Never keep a work factor below the current baseline once the passphrase changes.
         updated.kdfIterations = max(updated.kdfIterations, VaultCrypto.defaultIterations)
         try updated.wrap(vaultKey, passphrase: new, newSalt: true)
         // Prove the new wrapper opens the same key before saving it.
         guard VaultCrypto.keyData(try updated.unwrap(passphrase: new)) == VaultCrypto.keyData(vaultKey) else {
-            throw VaultError.crypto("The new passphrase did not verify. Nothing was changed.")
+            throw VaultError.crypto("The new vault password did not verify. Nothing was changed.")
         }
         try db.transaction { try Vault.writeHeader(updated, to: db) }
         header = updated
         key = vaultKey
-        audit("vault.passphrase_changed")
-        Log.vault.info("event=vault.passphrase_changed")
+        audit("vault.password_changed")
+        Log.vault.info("event=vault.password_changed")
         retireSnapshotsAfterCredentialChange()
     }
 

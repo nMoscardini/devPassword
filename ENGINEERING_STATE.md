@@ -32,6 +32,8 @@ A password and personal-records manager for Nino's Mac and iPhone, with an encry
 
 ## Open items
 
+- Change the master passphrase before real data goes in: the current test passphrase was shown in a screenshot during the restore test on 4 October (N1).
+
 - Reuse check against Apple Passwords and KeePass-format apps. Waits on Nino. Due before Stage 2.
 - Stage 0 proof: signing, Keychain access control, Touch ID keyboard, CloudKit records, AutoFill in Nino's browser.
 - Off-site copy of the backup folder and a written loss and downtime tolerance (N4). Waits on Nino choosing the destination.
@@ -59,16 +61,20 @@ See README.md.
 
 | Dataset | Working copy | Second device | Off-site | Last restore test |
 |---|---|---|---|---|
-| devPassword vault (Nino) | Mac Studio, Application Support | Not set | Not set | Automated test only (BackupTests, smoke test). No real drill yet |
+| devPassword vault (Nino) | Mac Studio, Application Support | Weekly encrypted backup to the folder set in Settings (OneDrive) | OneDrive (cloud) | 2026-10-04: restore drill passed in the app (backup, move items to Deleted, restore, items back) |
 
 ## Last verified
 
 2026-10-04: `scripts/smoke.sh` printed SMOKE PASSED after the security review fixes: 36 tests, 0 failures, including hostile work factor, export needs passphrase, owner-only files and snapshots removed after a credential change. Earlier: signed app built and run in Xcode by Nino with test data; Touch ID enable, unlock, cancel and wrong finger checked.
 
-Not verified: Touch ID after a fingerprint change; importer on real LastPass or mSecure export files; restore drill from an off-site copy.
+Not verified: Touch ID after a fingerprint change; importer on real LastPass or mSecure export files; restore from a copy downloaded from the OneDrive website onto a clean account.
 
 ## Session log
 
+- 2026-10-04: Restore no longer shows an alert over the Touch ID prompt (green note on the lock screen instead); Settings closes after restore. Restore window offers Touch ID for backups of the same vault (Backup.open withUnlockedVault, tested). App is brought forward before the automatic Touch ID prompt. Touch ID is never used to reset the vault password (by design).
+- 2026-10-04: Restore drill passed. UI now says vault password, not passphrase or master password (code and file format unchanged). Fixed: cancelling the Touch ID prompt brought it straight back; the system prompt's cancel button now reads Use Vault Password.
+- 2026-10-04: Restore moved to its own step-by-step sheet (Vault > Restore from Backup…). Passphrase and recovery code fields are now hidden by default with a show button; recovery code entry shows a character count and warns when the input is not a code.
+- 2026-10-04: Restore test confusion: items removed with Delete go to the Deleted list, so a backup restore found nothing missing and was not run. Renamed Delete to Move to Deleted and Restore to Put Back, added Vault > Restore from Backup…, logged move and put back in the activity log. scripts/diagnose.sh added (read-only counts and log).
 - 2026-10-04: Security review (ChatGPT) received. Fixed findings 1 to 4 and file permissions; 5 and 6 accepted. Decision 0005. New tests: hostile work factor, export needs passphrase, owner-only files, snapshots removed after credential change.
 - 2026-10-03: Project in git (github.com/nMoscardini/devPassword, first commit pushed). Picked up automatically by devGitStatus and devProjectStatus. Version set to 0.1.
 - 2026-10-03: Settings moved from SwiftUI Settings scene (fixed size) to a normal resizable window, 760 by 680 default, 600 by 480 minimum. Command-comma unchanged.

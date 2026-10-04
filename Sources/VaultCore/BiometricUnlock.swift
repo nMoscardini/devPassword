@@ -66,6 +66,7 @@ public enum BiometricUnlock {
     static func load(header: VaultHeader, reason: String) throws -> SymmetricKey {
         let context = LAContext()
         context.localizedReason = reason
+        context.localizedCancelTitle = "Use Vault Password"
         var query = baseQuery(header)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -74,7 +75,7 @@ public enum BiometricUnlock {
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         guard status == errSecSuccess else { throw error(for: status) }
         guard let data = result as? Data, data.count == 32 else {
-            throw VaultError.biometricUnavailable("The stored key is not valid. Unlock with your passphrase.")
+            throw VaultError.biometricUnavailable("The stored key is not valid. Unlock with your vault password.")
         }
         return SymmetricKey(data: data)
     }
@@ -88,9 +89,9 @@ public enum BiometricUnlock {
         case errSecUserCanceled:
             return .biometricCancelled
         case errSecItemNotFound:
-            return .biometricUnavailable("Touch ID is not set up for this vault, or your fingerprints changed. Unlock with your passphrase and it will be set up again.")
+            return .biometricUnavailable("Touch ID is not set up for this vault, or your fingerprints changed. Unlock with your vault password and it will be set up again.")
         case errSecAuthFailed:
-            return .biometricUnavailable("Touch ID did not unlock the vault. Use your passphrase.")
+            return .biometricUnavailable("Touch ID did not unlock the vault. Use your vault password.")
         case errSecMissingEntitlement:
             return .biometricUnavailable("Touch ID needs the signed app. Run devPassword from the Xcode project in App/, not swift run.")
         default:

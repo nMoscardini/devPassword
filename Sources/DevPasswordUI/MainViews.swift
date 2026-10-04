@@ -40,6 +40,7 @@ struct MainView: View {
         .sheet(item: $model.editing) { e in EntryEditorView(entry: e) }
         .sheet(isPresented: $model.showGenerator) { GeneratorView(onUse: nil) }
         .sheet(isPresented: $model.showImport) { ImportView() }
+        .sheet(isPresented: $model.showRestore) { RestoreView() }
         .safeAreaInset(edge: .bottom) {
             if model.integrityFailures > 0 {
                 Text("\(model.integrityFailures) record(s) failed their integrity check and are hidden. They are unchanged on disk. Restore from a backup if this persists.")
@@ -142,7 +143,7 @@ struct EntryDetailView: View {
                         .foregroundStyle(entry.expires(within: AppModel.expiringDays) ? Color.orange : Color.secondary)
                 }
                 if entry.isDeleted {
-                    Label("In Deleted. Restore it or delete it permanently.", systemImage: "trash")
+                    Label("In Deleted. Put it back, or delete it permanently.", systemImage: "trash")
                         .foregroundStyle(.orange)
                 }
 
@@ -208,7 +209,8 @@ struct EntryDetailView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 if entry.isDeleted {
-                    Button("Restore") { model.restoreDeleted(entry) }
+                    Button { model.restoreDeleted(entry) } label: { Label("Put Back", systemImage: "arrow.uturn.backward") }
+                        .help("Move this item out of Deleted")
                     Button("Delete Permanently", role: .destructive) { confirmPurge = true }
                 } else {
                     Button { model.toggleFavourite(entry) } label: {
@@ -216,7 +218,8 @@ struct EntryDetailView: View {
                     }
                     Button { model.editing = entry } label: { Label("Edit", systemImage: "pencil") }
                         .keyboardShortcut("e", modifiers: [.command])
-                    Button { model.moveToDeleted(entry) } label: { Label("Delete", systemImage: "trash") }
+                    Button { model.moveToDeleted(entry) } label: { Label("Move to Deleted", systemImage: "trash") }
+                        .help("Move to the Deleted list. You can put it back from there.")
                 }
             }
         }

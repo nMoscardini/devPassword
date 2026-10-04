@@ -84,7 +84,7 @@ final class VaultTests: XCTestCase {
         // Snapshots hold the old wrapped key, so they are removed once a change succeeds (review finding 3).
         let snaps = (try? FileManager.default.contentsOfDirectory(atPath: v.snapshotsDirectory.path)) ?? []
         XCTAssertTrue(snaps.filter { $0.hasPrefix("vault-") }.isEmpty)
-        XCTAssertTrue(v.auditLog().contains { $0.action == "vault.passphrase_changed" })
+        XCTAssertTrue(v.auditLog().contains { $0.action == "vault.password_changed" })
         XCTAssertTrue(v.auditLog().contains { $0.action == "snapshots.retired_after_credential_change" })
         // A low test work factor is raised to the baseline when the passphrase changes (finding 1).
         XCTAssertEqual(v.header.kdfIterations, VaultCrypto.defaultIterations)

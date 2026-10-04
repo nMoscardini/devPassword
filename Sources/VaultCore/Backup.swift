@@ -80,6 +80,15 @@ public enum Backup {
         try verify(archive, key: try archive.header.unwrap(recoveryCode: recoveryCode))
     }
 
+    /// Opens a backup of THIS vault with the key the unlocked vault already holds. Used for
+    /// restore with Touch ID. Fails for a backup from another vault or an older key.
+    public static func open(_ archive: BackupArchive, withUnlockedVault vault: Vault) throws -> OpenedBackup {
+        guard archive.header.vaultID == vault.header.vaultID, archive.header.keyID == vault.header.keyID else {
+            throw VaultError.invalid("This backup is from a different vault. Use its vault password or recovery code.")
+        }
+        return try verify(archive, key: try vault.requireKey())
+    }
+
     /// Checks the manifest, the digest over every record, and decrypts every record.
     static func verify(_ archive: BackupArchive, key: SymmetricKey) throws -> OpenedBackup {
         let manifestData: Data

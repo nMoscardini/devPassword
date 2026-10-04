@@ -27,6 +27,9 @@ final class AppModel: ObservableObject {
     @Published var editing: Entry?
     @Published var showGenerator = false
     @Published var showImport = false
+    @Published var showRestore = false
+    /// One-line note shown on the lock screen, e.g. after a restore. Cleared on unlock.
+    @Published var lockNotice: String?
     @Published var errorMessage: String?
     @Published var infoMessage: String?
     @Published var integrityFailures = 0
@@ -153,7 +156,7 @@ final class AppModel: ObservableObject {
             try await Task.detached { try vault.setPassphraseAfterRecovery(p) }.value
             didUnlock()
             rearmTouchID()
-            infoMessage = "New passphrase set. Your recovery code still works."
+            infoMessage = "New vault password set. Your recovery code still works."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -168,21 +171,32 @@ final class AppModel: ObservableObject {
             try await Task.detached { try vault.unlockWithBiometrics(reason: "unlock your vault") }.value
             didUnlock()
         } catch VaultError.biometricCancelled {
-            // User chose the passphrase instead. Nothing to report.
+            // User chose to type the vault password. Do not ask again until the next lock.
+            autoPromptSuppressed = true
         } catch {
+            autoPromptSuppressed = true
             if !automatic { errorMessage = error.localizedDescription }
         }
     }
 
     private var touchIDPromptPending = false
+    /// Set when the Touch ID prompt is cancelled or fails. Cleared by the next lock or unlock.
+    /// Stops the prompt coming straight back when macOS returns focus to the app after Cancel.
+    private var autoPromptSuppressed = false
 
     /// Shows the Touch ID prompt without a click, when the lock screen is in front of the user.
     /// Called on app activation, Mac wake or unlock, and after an idle lock. Never after a manual lock.
     func autoPromptTouchID() {
-        guard screen == .locked, touchIDEnabled, touchIDAvailable, !busy, !touchIDPromptPending,
+        guard screen == .locked, touchIDEnabled, touchIDAvailable, !busy, !touchIDPromptPending, !autoPromptSuppressed,
               NSApp.isActive, vault != nil else { return }
         touchIDPromptPending = true
-        Task { await unlockWithTouchID(automatic: true) }
+        NSApp.activate(ignoringOtherApps: true)
+        Task {
+            // Let window changes (restore, unlock screen) finish so the prompt opens over a settled, active app.
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard screen == .locked else { touchIDPromptPending = false; return }
+            await unlockWithTouchID(automatic: true)
+        }
     }
 
     /// Turns Touch ID on or off for this vault. Turning on needs the vault unlocked.
@@ -192,7 +206,7 @@ final class AppModel: ObservableObject {
             do {
                 try vault.enableBiometricUnlock()
                 touchIDEnabled = true
-                infoMessage = "\(biometricName) is on for this Mac. Your passphrase and recovery code still work. If you add or remove a fingerprint, unlock once with your passphrase to switch it back on."
+                infoMessage = "\(biometricName) is on for this Mac. Your vault password and recovery code still work. If you add or remove a fingerprint, unlock once with your vault password to switch it back on."
             } catch {
                 touchIDEnabled = false
                 errorMessage = error.localizedDescription
@@ -211,7 +225,9 @@ final class AppModel: ObservableObject {
     }
 
     private func didUnlock() {
+        lockNotice = nil
         lockedManually = false
+        autoPromptSuppressed = false
         reload()
         screen = .unlocked
         touch()
@@ -229,6 +245,7 @@ final class AppModel: ObservableObject {
 
     func lock() {
         guard screen == .unlocked || screen == .newPassphrase else { return }
+        autoPromptSuppressed = false   // a new lock may prompt again
         vault?.lock()
         entries = []
         selection = nil
@@ -236,6 +253,7 @@ final class AppModel: ObservableObject {
         search = ""
         showGenerator = false
         showImport = false
+        showRestore = false
         Clipboard.clearIfOurs()
         screen = .locked
     }
@@ -303,14 +321,20 @@ final class AppModel: ObservableObject {
         var e = entry
         e.deletedAt = Date()
         save(e)
+        vault?.audit("entry.moved_to_deleted")
         selection = nil
     }
 
+    /// Puts one item back from the Deleted list. Not the same as restoring a backup.
     func restoreDeleted(_ entry: Entry) {
         var e = entry
         e.deletedAt = nil
         save(e)
+        vault?.audit("entry.put_back_from_deleted")
     }
+
+    /// Which Settings tab to show. Lets the Vault menu open Settings straight at Backup.
+    @Published var settingsTab: SettingsTab = .security
 
     func purge(_ entry: Entry) {
         guard let vault else { return }
@@ -346,7 +370,7 @@ final class AppModel: ObservableObject {
         defer { busy = false }
         do {
             try await Task.detached { try vault.changePassphrase(current: current, new: new) }.value
-            infoMessage = "Passphrase changed. Local snapshots made with the old passphrase were removed. Encrypted backups made before today still open with the OLD passphrase: make a new backup now, and delete older ones if you think the old passphrase is known to anyone."
+            infoMessage = "Vault password changed. Local snapshots made with the old vault password were removed. Encrypted backups made before today still open with the OLD vault password: make a new backup now, and delete older ones if you think the old vault password is known to anyone."
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -410,7 +434,8 @@ final class AppModel: ObservableObject {
             try Backup.restore(opened, to: vaultURL)
             vault = try Vault.open(at: vaultURL)
             screen = .locked
-            infoMessage = "Restored. Unlock with the passphrase that was current when the backup was made. The previous vault was kept beside it."
+            // No alert: it would sit on top of the Touch ID prompt. A quiet line on the lock screen instead.
+            lockNotice = "Restored from the backup. Your previous vault is kept beside it."
         } catch {
             vault = try? Vault.open(at: vaultURL)
             screen = vault == nil ? .setup : .locked
@@ -427,7 +452,7 @@ final class AppModel: ObservableObject {
             infoMessage = "Exported \(result.count) items. This file is not encrypted. Delete it when you are done."
             return true
         } catch VaultError.wrongSecret {
-            errorMessage = "That passphrase is not correct."
+            errorMessage = "That vault password is not correct."
             return false
         } catch {
             errorMessage = error.localizedDescription

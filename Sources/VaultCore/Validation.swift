@@ -9,7 +9,7 @@ public enum PassphrasePolicy {
             return "Use at least \(minimumLength) characters. Four or more random words works well."
         }
         if Set(passphrase).count < 5 {
-            return "That passphrase repeats too few characters."
+            return "That vault password repeats too few characters."
         }
         return nil
     }

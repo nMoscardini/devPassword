@@ -31,7 +31,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
-    @State private var tab: SettingsTab = .security
+    private var tab: SettingsTab { model.settingsTab }
 
     var body: some View {
         Group {
@@ -39,7 +39,7 @@ struct SettingsView: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 6) {
                         ForEach(SettingsTab.allCases) { t in
-                            Button { tab = t } label: {
+                            Button { model.settingsTab = t } label: {
                                 VStack(spacing: 4) {
                                     Image(systemName: t.symbol)
                                         .font(.system(size: 20))
@@ -97,7 +97,7 @@ struct SecuritySettings: View {
                 if model.touchIDAvailable {
                     Toggle("Unlock with \(model.biometricName)",
                            isOn: Binding(get: { model.touchIDEnabled }, set: { model.setTouchID($0) }))
-                    Text("The vault key is kept in this Mac's Keychain, released only by a fingerprint enrolled today. It never syncs to iCloud. Adding or removing a fingerprint switches it off until you next unlock with your passphrase.")
+                    Text("The vault key is kept in this Mac's Keychain, released only by a fingerprint enrolled today. It never syncs to iCloud. Adding or removing a fingerprint switches it off until you next unlock with your password.")
                         .font(.caption).foregroundStyle(.secondary)
                 } else {
                     Text("No Touch ID found. Connect a Magic Keyboard with Touch ID and enrol a finger in System Settings.")
@@ -105,10 +105,10 @@ struct SecuritySettings: View {
                 }
             }
 
-            Section("Change master passphrase") {
-                SecureField("Current passphrase", text: $current)
+            Section("Change vault password") {
+                SecureField("Current vault password", text: $current)
                 NewPassphraseFields(first: $p1, second: $p2)
-                Button("Change Passphrase") {
+                Button("Change Vault Password") {
                     let c = current, n = p1
                     Task {
                         if await model.changePassphrase(current: c, new: n) { current = ""; p1 = ""; p2 = "" }
@@ -142,12 +142,7 @@ struct SecuritySettings: View {
 
 struct BackupSettings: View {
     @EnvironmentObject var model: AppModel
-    @State private var restoreURL: URL?
-    @State private var restoreSecret = ""
-    @State private var restoreWithCode = false
-    @State private var opened: OpenedBackup?
-    @State private var pickBackup = false
-    @State private var confirmRestore = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Form {
@@ -164,53 +159,20 @@ struct BackupSettings: View {
                 }
                 Button("Back Up Now") { model.backupNow() }
                     .disabled(model.backupFolder == nil)
-                Text("Keeps the newest four. Backups open with your passphrase or recovery code. They do not replace an off-site copy: make sure this folder is itself backed up elsewhere.")
+                Text("Keeps the newest four. Backups open with your vault password or recovery code. They do not replace an off-site copy: make sure this folder is itself backed up elsewhere.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Restore") {
-                Button("Choose Backup File…") { pickBackup = true }
-                if let restoreURL {
-                    Text(restoreURL.lastPathComponent).font(.caption)
-                    Toggle("Open with recovery code", isOn: $restoreWithCode)
-                    if restoreWithCode {
-                        TextField("Recovery code", text: $restoreSecret).font(.body.monospaced())
-                    } else {
-                        SecureField("Passphrase at the time of the backup", text: $restoreSecret)
-                    }
-                    Button("Check Backup") { check(restoreURL) }
-                        .disabled(restoreSecret.isEmpty)
-                }
-                if let p = opened?.preview {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Backup from \(p.createdAt.formatted(date: .abbreviated, time: .shortened)) is intact.").bold()
-                        ForEach(RecordType.allCases) { t in
-                            if let n = p.countsByType[t] { Text("\(t.pluralName): \(n)") }
-                        }
-                        if p.deletedCount > 0 { Text("In Deleted: \(p.deletedCount)") }
-                        Text("Examples: " + p.sampleTitles.joined(separator: ", ")).foregroundStyle(.secondary)
-                    }
-                    Button("Restore This Backup…", role: .destructive) { confirmRestore = true }
+                Text("Replaces the whole vault with a backup. To get back one item you deleted, use the Deleted list in the sidebar instead.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Restore from Backup…") {
+                    openWindow(id: "main")
+                    model.showRestore = true
                 }
             }
         }
         .formStyle(.grouped)
-        .fileImporter(isPresented: $pickBackup, allowedContentTypes: [.data]) { result in
-            restoreURL = try? result.get()
-            opened = nil
-            restoreSecret = ""
-        }
-        .confirmationDialog("Replace the current vault with this backup?", isPresented: $confirmRestore) {
-            Button("Restore", role: .destructive) {
-                if let o = opened {
-                    opened = nil
-                    restoreSecret = ""
-                    model.restore(o)
-                }
-            }
-        } message: {
-            Text("The current vault is kept beside it as a dated file, not deleted. The app locks.")
-        }
     }
 
     private func chooseFolder() {
@@ -220,17 +182,6 @@ struct BackupSettings: View {
         panel.canCreateDirectories = true
         panel.prompt = "Use Folder"
         if panel.runModal() == .OK, let url = panel.url { model.backupFolder = url }
-    }
-
-    private func check(_ url: URL) {
-        do {
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            opened = try model.openBackup(at: url, secret: restoreSecret, isRecoveryCode: restoreWithCode)
-        } catch {
-            opened = nil
-            model.errorMessage = error.localizedDescription
-        }
     }
 }
 
@@ -245,7 +196,7 @@ struct ExportSettings: View {
                     .font(.callout)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-                SecureField("Enter your passphrase to confirm", text: $passphrase)
+                SecureField("Enter your vault password to confirm", text: $passphrase)
                 Button("Export CSV…", action: export)
                     .disabled(passphrase.isEmpty)
             }

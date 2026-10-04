@@ -113,6 +113,18 @@ final class BackupTests: XCTestCase {
         XCTAssertThrowsError(try Backup.open(archive, passphrase: "wrong wrong wrong"))
     }
 
+    func testOpenBackupWithUnlockedSameVaultOnly() throws {
+        let (vault, _) = try makeVault()
+        try vault.saveAll(sampleEntries())
+        let archive = try Backup.makeArchive(from: vault)
+        XCTAssertEqual(try Backup.open(archive, withUnlockedVault: vault).preview.entryCount, 5)
+
+        let (other, _) = try makeVault()
+        XCTAssertThrowsError(try Backup.open(archive, withUnlockedVault: other))
+        vault.lock()
+        XCTAssertThrowsError(try Backup.open(archive, withUnlockedVault: vault))
+    }
+
     func testTamperedBackupRejected() throws {
         let (vault, _) = try makeVault()
         try vault.saveAll(sampleEntries())
