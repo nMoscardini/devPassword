@@ -121,6 +121,9 @@ struct SecuritySettings: View {
                 Text("Replace the code if you think someone has seen it. The new code only takes effect after you type it back. Backups made before the change still open with the old code.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Replace Recovery Code…") { confirmReplace = true }
+                Button("Print Emergency Sheet…") { EmergencySheet.print(model: model) }
+                Text("A one-page guide to getting back in, with boxes to write the recovery code by hand. It contains no passwords.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

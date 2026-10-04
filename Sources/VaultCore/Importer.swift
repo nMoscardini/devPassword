@@ -169,6 +169,12 @@ public enum Importer {
         if let exact = RecordType(rawValue: value) { return exact }
         if ["login", "logins", "weblogin", "weblogins", "password", "passwords", "website"].contains(v) { return .login }
         if v.contains("note") { return .secureNote }
+        if v.contains("prescription") || v.contains("medicine") { return .prescription }
+        if v.contains("email") || v.contains("mail") { return .emailAccount }
+        if v.contains("nationalinsurance") { return .identityDocument }
+        if v.contains("insurance") || v.contains("policy") { return .insurance }
+        if v.contains("registration") || v.contains("licencekey") || v.contains("licensekey") || v.contains("software") { return .registrationCode }
+        if v.contains("vehicle") || v == "car" { return .vehicle }
         if v.contains("card") { return .paymentCard }
         if v.contains("bank") || v.contains("account") { return .bankAccount }
         if v.contains("passport") || v.contains("licen") || v.contains("identity") || v.contains("insurance") || v == "id" {
@@ -184,44 +190,61 @@ public enum Importer {
 
     // MARK: Preview
 
-    public static func preview(headers: [String], rows: [[String]], mapping: ImportMapping, existing: [Entry]) -> ImportPreview {
-        var existingKeys = Set(existing.filter { !$0.isDeleted }.map(dedupKey))
-        var conflictKeys = Set(existing.filter { !$0.isDeleted }.compactMap(conflictKey))
-        var out: [ImportRow] = []
+    /// A row's outcome before duplicate checks: an entry, or the reason it was rejected.
+    public struct BuiltRow {
+        public let number: Int
+        public let entry: Entry?
+        public let problem: String?
+        public init(number: Int, entry: Entry?, problem: String?) {
+            self.number = number; self.entry = entry; self.problem = problem
+        }
+    }
 
+    public static func preview(headers: [String], rows: [[String]], mapping: ImportMapping, existing: [Entry]) -> ImportPreview {
+        var built: [BuiltRow] = []
         for (i, row) in rows.enumerated() {
             let number = i + 2
             guard row.count == headers.count else {
-                out.append(ImportRow(id: number, status: .rejected, entry: nil,
-                                     reason: "Has \(row.count) fields, expected \(headers.count)"))
+                built.append(BuiltRow(number: number, entry: nil, problem: "Has \(row.count) fields, expected \(headers.count)"))
                 continue
             }
-            let built: Entry
             do {
-                built = try buildEntry(headers: headers, row: row, mapping: mapping)
+                built.append(BuiltRow(number: number, entry: try buildEntry(headers: headers, row: row, mapping: mapping), problem: nil))
             } catch {
-                out.append(ImportRow(id: number, status: .rejected, entry: nil, reason: error.localizedDescription))
+                built.append(BuiltRow(number: number, entry: nil, problem: error.localizedDescription))
+            }
+        }
+        return classify(built, existing: existing)
+    }
+
+    /// Duplicate and conflict checks against the vault and earlier rows in the same file.
+    public static func classify(_ built: [BuiltRow], existing: [Entry]) -> ImportPreview {
+        var existingKeys = Set(existing.filter { !$0.isDeleted }.map(dedupKey))
+        var conflictKeys = Set(existing.filter { !$0.isDeleted }.compactMap(conflictKey))
+        var out: [ImportRow] = []
+        for b in built {
+            guard var entry = b.entry else {
+                out.append(ImportRow(id: b.number, status: .rejected, entry: nil, reason: b.problem))
                 continue
             }
-            var entry = built
             let key = dedupKey(entry)
             if existingKeys.contains(key) {
-                out.append(ImportRow(id: number, status: .duplicate, entry: entry, reason: nil))
+                out.append(ImportRow(id: b.number, status: .duplicate, entry: entry, reason: nil))
                 continue
             }
             existingKeys.insert(key)
             if let ck = conflictKey(entry) {
                 if conflictKeys.contains(ck) {
                     if !entry.tags.contains(reviewTag) { entry.tags.append(reviewTag) }
-                    out.append(ImportRow(id: number, status: .conflict, entry: entry,
+                    out.append(ImportRow(id: b.number, status: .conflict, entry: entry,
                                          reason: "Same website and username, different password. Tagged \(reviewTag)."))
                     continue
                 }
                 conflictKeys.insert(ck)
             }
-            out.append(ImportRow(id: number, status: .new, entry: entry, reason: nil))
+            out.append(ImportRow(id: b.number, status: .new, entry: entry, reason: nil))
         }
-        Log.importer.info("event=import.previewed rows=\(rows.count, privacy: .public)")
+        Log.importer.info("event=import.previewed rows=\(built.count, privacy: .public)")
         return ImportPreview(rows: out)
     }
 
@@ -331,7 +354,7 @@ public enum Importer {
     public static func dedupKey(_ e: Entry) -> String {
         switch e.type {
         case .login:
-            return ["login", site(e), e[field: "username"], e[field: "password"]].joined(separator: "\u{1F}")
+            return ["login", loginPlace(e), e[field: "username"], e[field: "password"]].joined(separator: "\u{1F}")
         case .secureNote:
             return ["note", e.title.lowercased(), e.notes].joined(separator: "\u{1F}")
         case .paymentCard:
@@ -340,12 +363,31 @@ public enum Importer {
             return ["bank", e.title.lowercased(), e[field: "accountNumber"].filter(\.isNumber), e[field: "iban"]].joined(separator: "\u{1F}")
         case .identityDocument:
             return ["id", e.title.lowercased(), e[field: "documentNumber"]].joined(separator: "\u{1F}")
+        case .prescription:
+            return ["rx", e.title.lowercased(), e[field: "medicineName"], e[field: "dose"]].joined(separator: "\u{1F}")
+        case .vehicle:
+            return ["vehicle", e.title.lowercased(), e[field: "registration"], e[field: "vin"]].joined(separator: "\u{1F}")
+        case .emailAccount:
+            return ["email", e.title.lowercased(), e[field: "emailAddress"], e[field: "emailPassword"]].joined(separator: "\u{1F}")
+        case .insurance:
+            return ["insurance", e.title.lowercased(), e[field: "policyNumber"]].joined(separator: "\u{1F}")
+        case .registrationCode:
+            return ["regcode", e.title.lowercased(), e[field: "licenceKey"]].joined(separator: "\u{1F}")
         }
     }
 
-    /// Logins only: same website and username.
+    /// Where a login belongs: its website, or its title when it has no website. Without the
+    /// title fallback, every website-less login with the same username (one email address used
+    /// everywhere) looked like the same account: false conflicts, and with a reused password,
+    /// rows skipped as duplicates.
+    static func loginPlace(_ e: Entry) -> String {
+        let s = site(e)
+        return s.isEmpty ? "title:" + e.title.lowercased().trimmingCharacters(in: .whitespaces) : s
+    }
+
+    /// Logins only: same website (or, without one, same title) and username.
     public static func conflictKey(_ e: Entry) -> String? {
         guard e.type == .login, !site(e).isEmpty || !e[field: "username"].isEmpty else { return nil }
-        return [site(e), e[field: "username"]].joined(separator: "\u{1F}")
+        return [loginPlace(e), e[field: "username"]].joined(separator: "\u{1F}")
     }
 }

@@ -143,6 +143,21 @@ final class VaultTests: XCTestCase {
         }
     }
 
+    func testItemIconRoundTripsAndOldRecordsStillDecode() throws {
+        var e = sampleEntries()[0]
+        XCTAssertEqual(e.symbol, RecordType.login.symbol)
+        e.icon = "airplane"
+        let (vault, _) = try makeVault()
+        try vault.save(e)
+        XCTAssertEqual(try vault.loadAll().entries[0].symbol, "airplane")
+
+        // A record saved before icons existed has no "icon" key at all.
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(sampleEntries()[0])) as! [String: Any]
+        json.removeValue(forKey: "icon")
+        let old = try JSONDecoder().decode(Entry.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(old.icon)
+    }
+
     func testTamperedRecordIsReportedNotShown() throws {
         let (vault, _) = try makeVault()
         let saved = try vault.saveAll(sampleEntries())

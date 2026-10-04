@@ -38,7 +38,7 @@ struct EntryEditorView: View {
                             FieldEditor(label: def.label, placeholder: def.placeholder,
                                         concealed: def.kind == .concealed,
                                         value: binding(def.key),
-                                        onGenerate: def.key == "password" ? { showGenerator = true } : nil)
+                                        onGenerate: def.key == draft.type.passwordKey ? { showGenerator = true } : nil)
                         }
                     }
                 }
@@ -78,6 +78,9 @@ struct EntryEditorView: View {
                     TextField("Tags, separated by commas", text: $tagsText)
                     Toggle("Favourite", isOn: $draft.favourite)
                 }
+                Section("Icon") {
+                    IconPicker(selection: $draft.icon, typeSymbol: draft.type.symbol)
+                }
             }
             .formStyle(.grouped)
 
@@ -103,7 +106,7 @@ struct EntryEditorView: View {
         .frame(minWidth: 620, minHeight: 600)
         .navigationTitle(isNew ? "New \(draft.type.displayName)" : "Edit \(original.title)")
         .sheet(isPresented: $showGenerator) {
-            GeneratorView { pw in draft[field: "password"] = pw }
+            GeneratorView { pw in if let k = draft.type.passwordKey { draft[field: k] = pw } }
         }
     }
 
@@ -121,8 +124,7 @@ struct EntryEditorView: View {
             .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         e.customFields = e.customFields.filter { !$0.label.isEmpty || !$0.value.isEmpty }
             .map { f in var f = f; if f.label.isEmpty { f.label = "Field" }; return f }
-        let old = original[field: "password"]
-        if e.type == .login, !old.isEmpty, old != e[field: "password"] {
+        if let k = e.type.passwordKey, case let old = original[field: k], !old.isEmpty, old != e[field: k] {
             e.previousPassword = PreviousValue(value: old, changedAt: Date())
         }
         if e.type != .secureNote { e.notesConcealed = false }
@@ -222,6 +224,48 @@ struct GeneratorView: View {
         } catch {
             value = ""
             problem = error.localizedDescription
+        }
+    }
+}
+
+/// Choice of icons for an item. Nil selection means "use the type's icon".
+struct IconPicker: View {
+    @Binding var selection: String?
+    let typeSymbol: String
+
+    static let symbols: [String] = [
+        "key.horizontal", "lock", "creditcard", "building.columns", "person.text.rectangle", "note.text",
+        "envelope", "globe", "airplane", "car", "tram", "bicycle",
+        "house", "building.2", "briefcase", "cart", "bag", "gift",
+        "heart", "cross.case", "stethoscope", "pills", "graduationcap", "book",
+        "phone", "iphone", "laptopcomputer", "desktopcomputer", "wifi", "tv",
+        "gamecontroller", "music.note", "camera", "newspaper", "film", "sportscourt",
+        "figure.run", "dumbbell", "fork.knife", "cup.and.saucer", "pawprint", "leaf",
+        "umbrella", "shield", "bolt", "drop", "flame", "wrench.and.screwdriver",
+        "sterlingsign.circle", "eurosign.circle", "dollarsign.circle", "chart.line.uptrend.xyaxis",
+        "person", "person.2", "star", "bell", "calendar", "folder",
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(36), spacing: 6), count: 12), spacing: 6) {
+                ForEach(Self.symbols, id: \.self) { name in
+                    let chosen = (selection ?? typeSymbol) == name
+                    Button { selection = (name == typeSymbol) ? nil : name } label: {
+                        Image(systemName: name)
+                            .font(.system(size: 16))
+                            .frame(width: 32, height: 32)
+                            .background(chosen ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.08),
+                                        in: RoundedRectangle(cornerRadius: 6))
+                            .overlay(RoundedRectangle(cornerRadius: 6)
+                                .stroke(chosen ? Color.accentColor : Color.clear, lineWidth: 1.5))
+                    }
+                    .buttonStyle(.plain)
+                    .help(name)
+                }
+            }
+            Button("Use Type Icon") { selection = nil }
+                .disabled(selection == nil)
         }
     }
 }

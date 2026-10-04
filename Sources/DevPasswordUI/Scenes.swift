@@ -39,6 +39,9 @@ public struct DevPasswordScenes: Scene {
                     .keyboardShortcut("b", modifiers: [.command, .shift])
                     .disabled(!model.isUnlocked)
                 RestoreMenuButton(model: model)
+                Divider()
+                Button("Print Emergency Sheet…") { EmergencySheet.print(model: model) }
+                    .disabled(!model.isUnlocked)
             }
         }
 

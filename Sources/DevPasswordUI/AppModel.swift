@@ -17,6 +17,18 @@ enum SidebarFilter: Hashable {
 
 /// App state. Main actor only. Decrypted records live in memory while unlocked and are
 /// dropped on lock.
+enum ListSortOrder: String, CaseIterable, Identifiable {
+    case name, newest, oldest
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .name: return "Name"
+        case .newest: return "Recently changed first"
+        case .oldest: return "Longest unchanged first"
+        }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var screen: Screen = .locked
@@ -28,6 +40,9 @@ final class AppModel: ObservableObject {
     @Published var showGenerator = false
     @Published var showImport = false
     @Published var showRestore = false
+    @Published var sortOrder: ListSortOrder = ListSortOrder(rawValue: UserDefaults.standard.string(forKey: "sortOrder") ?? "") ?? .name {
+        didSet { UserDefaults.standard.set(sortOrder.rawValue, forKey: "sortOrder") }
+    }
     /// One-line note shown on the lock screen, e.g. after a restore. Cleared on unlock.
     @Published var lockNotice: String?
     @Published var errorMessage: String?
@@ -292,7 +307,11 @@ final class AppModel: ObservableObject {
         if f == .expiring {
             return list.sorted { ($0.expiryDate ?? .distantFuture) < ($1.expiryDate ?? .distantFuture) }
         }
-        return list.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        switch sortOrder {
+        case .name: return list.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .newest: return list.sorted { $0.modified > $1.modified }
+        case .oldest: return list.sorted { $0.modified < $1.modified }
+        }
     }
 
     func beginNew(_ type: RecordType) {

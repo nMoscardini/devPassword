@@ -2,7 +2,7 @@ import Foundation
 
 /// RFC 4180 CSV: quoted commas, doubled quotes, multiline fields, CRLF or LF, optional BOM.
 public enum CSV {
-    public static func parse(_ text: String) throws -> [[String]] {
+    public static func parse(_ text: String, delimiter: Unicode.Scalar = ",") throws -> [[String]] {
         var scalars = Array(text.unicodeScalars)
         if scalars.first == "\u{FEFF}" { scalars.removeFirst() }
 
@@ -41,7 +41,7 @@ public enum CSV {
             switch c {
             case "\"":
                 if field.isEmpty { inQuotes = true } else { field.append(c) }
-            case ",":
+            case delimiter:
                 endField()
             case "\r":
                 if i + 1 < scalars.count && scalars[i + 1] == "\n" { i += 1 }

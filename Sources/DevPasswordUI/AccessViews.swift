@@ -38,6 +38,9 @@ struct SetupView: View {
                 .foregroundStyle(.secondary)
             NewPassphraseFields(first: $p1, second: $p2)
             HStack {
+                Button("Restore from a backup instead…") { model.showRestore = true }
+                    .buttonStyle(.link)
+                    .help("On a new Mac: open your vault from a devPassword backup")
                 Spacer()
                 if model.busy { ProgressView().controlSize(.small) }
                 Button("Create Vault") {
@@ -51,6 +54,7 @@ struct SetupView: View {
         }
         .padding(40)
         .frame(maxWidth: 560)
+        .sheet(isPresented: $model.showRestore) { RestoreView() }
     }
 }
 

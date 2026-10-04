@@ -32,7 +32,8 @@ public struct FieldDef: Hashable {
 
 /// Record types R01 to R05 in the spec. R06 (custom fields) applies to every type.
 public enum RecordType: String, Codable, CaseIterable, Identifiable, Hashable {
-    case login, secureNote, paymentCard, bankAccount, identityDocument
+    case login, secureNote, paymentCard, bankAccount, identityDocument, prescription, vehicle,
+         emailAccount, insurance, registrationCode
 
     public var id: String { rawValue }
 
@@ -43,6 +44,11 @@ public enum RecordType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .paymentCard: return "Payment Card"
         case .bankAccount: return "Bank Account"
         case .identityDocument: return "Identity Document"
+        case .prescription: return "Prescription"
+        case .vehicle: return "Vehicle"
+        case .emailAccount: return "Email Account"
+        case .insurance: return "Insurance"
+        case .registrationCode: return "Registration Code"
         }
     }
 
@@ -53,6 +59,11 @@ public enum RecordType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .paymentCard: return "Payment Cards"
         case .bankAccount: return "Bank Accounts"
         case .identityDocument: return "Identity Documents"
+        case .prescription: return "Prescriptions"
+        case .vehicle: return "Vehicles"
+        case .emailAccount: return "Email Accounts"
+        case .insurance: return "Insurance"
+        case .registrationCode: return "Registration Codes"
         }
     }
 
@@ -64,6 +75,11 @@ public enum RecordType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .paymentCard: return "creditcard"
         case .bankAccount: return "building.columns"
         case .identityDocument: return "person.text.rectangle"
+        case .prescription: return "pills"
+        case .vehicle: return "car"
+        case .emailAccount: return "envelope"
+        case .insurance: return "umbrella"
+        case .registrationCode: return "barcode"
         }
     }
 
@@ -96,8 +112,47 @@ public enum RecordType: String, Codable, CaseIterable, Identifiable, Hashable {
                     FieldDef("holderName", "Holder name"),
                     FieldDef("documentNumber", "Document number", .concealed, lastFour: true),
                     FieldDef("issuingAuthority", "Issuing country or authority"),
-                    FieldDef("issueDate", "Issue date", .date, placeholder: "YYYY-MM-DD"),
-                    FieldDef("expiryDate", "Expiry date", .date, placeholder: "YYYY-MM-DD")]
+                    FieldDef("issueDate", "Issue date", .date, placeholder: "DD/MM/YYYY"),
+                    FieldDef("expiryDate", "Expiry date", .date, placeholder: "DD/MM/YYYY")]
+        case .prescription:
+            return [FieldDef("medicineName", "Medicine"),
+                    FieldDef("dose", "Dose", placeholder: "e.g. 10 mg, once daily"),
+                    FieldDef("doctor", "Doctor"),
+                    FieldDef("pharmacy", "Pharmacy"),
+                    FieldDef("pharmacyPhone", "Pharmacy phone")]
+        case .vehicle:
+            return [FieldDef("registration", "Registration"),
+                    FieldDef("vin", "VIN"),
+                    FieldDef("datePurchased", "Date purchased", .date, placeholder: "DD/MM/YYYY"),
+                    FieldDef("tyreSize", "Tyre size"),
+                    FieldDef("lastMOT", "Last MOT", .date, placeholder: "DD/MM/YYYY"),
+                    FieldDef("lastService", "Last serviced", .date, placeholder: "DD/MM/YYYY")]
+        case .emailAccount:
+            return [FieldDef("emailAddress", "Email address"),
+                    FieldDef("emailPassword", "Password", .concealed),
+                    FieldDef("incomingServer", "Incoming server", placeholder: "IMAP or POP3"),
+                    FieldDef("outgoingServer", "Outgoing server", placeholder: "SMTP")]
+        case .insurance:
+            return [FieldDef("insurer", "Insurer"),
+                    FieldDef("policyNumber", "Policy number"),
+                    FieldDef("groupNumber", "Group number"),
+                    FieldDef("insured", "Insured"),
+                    FieldDef("renewalDate", "Renewal date", .date, placeholder: "DD/MM/YYYY"),
+                    FieldDef("insurerPhone", "Phone")]
+        case .registrationCode:
+            return [FieldDef("product", "Product"),
+                    FieldDef("licenceKey", "Licence key", .concealed),
+                    FieldDef("registeredTo", "Registered to"),
+                    FieldDef("purchaseDate", "Purchase date", .date, placeholder: "DD/MM/YYYY")]
+        }
+    }
+
+    /// The field the password generator and "previous password" history apply to, if any.
+    public var passwordKey: String? {
+        switch self {
+        case .login: return "password"
+        case .emailAccount: return "emailPassword"
+        default: return nil
         }
     }
 
@@ -152,6 +207,9 @@ public struct Entry: Codable, Identifiable, Hashable {
     public var modified: Date
     /// Set when moved to Deleted. A deleted record can be restored or purged.
     public var deletedAt: Date?
+    /// Icon the user chose for this item (SF Symbol name). Nil means the type's icon.
+    /// Optional, so records saved before icons existed still decode.
+    public var icon: String?
 
     public init(id: UUID = UUID(), type: RecordType, title: String = "") {
         self.id = id
@@ -168,6 +226,7 @@ public struct Entry: Codable, Identifiable, Hashable {
         self.created = Date()
         self.modified = Date()
         self.deletedAt = nil
+        self.icon = nil
     }
 
     public subscript(field key: String) -> String {
@@ -177,13 +236,29 @@ public struct Entry: Codable, Identifiable, Hashable {
 
     public var isDeleted: Bool { deletedAt != nil }
 
+    /// The icon to show: the user's choice, else the type's.
+    public var symbol: String { icon ?? type.symbol }
+
     /// Expiry for cards and identity documents, as the last day it is valid.
     public var expiryDate: Date? {
         switch type {
         case .paymentCard: return DateParsing.cardExpiry(self[field: "cardExpiry"])
-        case .identityDocument: return DateParsing.isoDate(self[field: "expiryDate"])
+        case .identityDocument: return DateParsing.date(self[field: "expiryDate"])
+        case .insurance: return DateParsing.date(self[field: "renewalDate"])
+        case .vehicle:
+            // Next MOT is due a year after the last one.
+            guard let last = DateParsing.date(self[field: "lastMOT"]) else { return nil }
+            return Calendar(identifier: .gregorian).date(byAdding: .year, value: 1, to: last)
         default: return nil
         }
+    }
+
+    /// Words for the expiry line: "Expires" for cards and documents, "MOT due" for vehicles.
+    public func expiryText(_ date: Date, now: Date = Date()) -> String {
+        let past = date < now
+        if type == .vehicle { return past ? "MOT overdue since" : "MOT due" }
+        if type == .insurance { return past ? "Renewal was due" : "Renews" }
+        return past ? "Expired" : "Expires"
     }
 
     public func expires(within days: Int, from now: Date = Date()) -> Bool {
@@ -221,6 +296,16 @@ public struct Entry: Codable, Identifiable, Hashable {
             return [self[field: "bankName"], Masking.lastFour(self[field: "accountNumber"])].filter { !$0.isEmpty }.joined(separator: "  ")
         case .identityDocument:
             return [self[field: "documentType"], self[field: "holderName"]].filter { !$0.isEmpty }.joined(separator: " - ")
+        case .prescription:
+            return [self[field: "medicineName"], self[field: "dose"]].filter { !$0.isEmpty }.joined(separator: "  ")
+        case .vehicle:
+            return self[field: "registration"]
+        case .emailAccount:
+            return self[field: "emailAddress"]
+        case .insurance:
+            return [self[field: "insurer"], self[field: "policyNumber"]].filter { !$0.isEmpty }.joined(separator: "  ")
+        case .registrationCode:
+            return self[field: "product"]
         }
     }
 }
@@ -249,6 +334,17 @@ public enum DateParsing {
         comps.month = month + 1
         comps.day = 0   // day 0 of next month = last day of this month
         return Calendar(identifier: .gregorian).date(from: comps)
+    }
+
+    /// A date typed the UK way (DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY) or as YYYY-MM-DD.
+    public static func date(_ s: String) -> Date? {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        if let iso = isoDate(t) { return iso }
+        let parts = t.split(whereSeparator: { $0 == "/" || $0 == "-" || $0 == "." })
+        guard parts.count == 3, let d = Int(parts[0]), let m = Int(parts[1]), var y = Int(parts[2]),
+              parts[2].count == 4 || parts[2].count == 2 else { return nil }
+        if parts[2].count == 2 { y += 2000 }
+        return isoDate(String(format: "%04d-%02d-%02d", y, m, d))
     }
 
     /// "YYYY-MM-DD".

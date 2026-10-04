@@ -36,11 +36,11 @@ public enum EntryValidation {
             if !exp.isEmpty && DateParsing.cardExpiry(exp) == nil {
                 out.append("Expiry should look like MM/YY.")
             }
-        case .identityDocument:
-            for key in ["issueDate", "expiryDate"] {
-                let v = e[field: key]
-                if !v.isEmpty && DateParsing.isoDate(v) == nil {
-                    out.append("\(RecordType.allFieldDefs[key]?.label ?? key) should look like YYYY-MM-DD.")
+        case .identityDocument, .vehicle, .insurance, .registrationCode:
+            for def in e.type.fieldDefs where def.kind == .date {
+                let v = e[field: def.key]
+                if !v.isEmpty && DateParsing.date(v) == nil {
+                    out.append("\(def.label) should look like DD/MM/YYYY.")
                 }
             }
         case .bankAccount:
@@ -51,8 +51,8 @@ public enum EntryValidation {
         default:
             break
         }
-        for f in e.customFields where f.kind == .date && !f.value.isEmpty && DateParsing.isoDate(f.value) == nil {
-            out.append("\(f.label) should look like YYYY-MM-DD.")
+        for f in e.customFields where f.kind == .date && !f.value.isEmpty && DateParsing.date(f.value) == nil {
+            out.append("\(f.label) should look like DD/MM/YYYY.")
         }
         return out
     }

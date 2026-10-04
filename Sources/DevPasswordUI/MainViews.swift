@@ -31,6 +31,15 @@ struct MainView: View {
                 } label: {
                     Label("New", systemImage: "plus")
                 }
+                Menu {
+                    Picker("Sort by", selection: $model.sortOrder) {
+                        ForEach(ListSortOrder.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    Label("Sort", systemImage: "arrow.up.arrow.down")
+                }
+                .help("Sort by name or by when items were last changed")
                 Button { model.showGenerator = true } label: { Label("Generate", systemImage: "wand.and.stars") }
                     .help("Generate a password")
                 Button { model.lockManually() } label: { Label("Lock", systemImage: "lock") }
@@ -56,27 +65,49 @@ struct MainView: View {
 struct SidebarView: View {
     @EnvironmentObject var model: AppModel
 
+    // Every row is built the same way: a ForEach over the List's selection type (SidebarFilter?).
+    // Mixing hand-written rows with ForEach rows left the hand-written ones unclickable.
+    private static let top: [SidebarFilter?] = [.all, .favourites, .expiring]
+    private static let types: [SidebarFilter?] = RecordType.allCases.map { Optional(SidebarFilter.type($0)) }
+    private static let bottom: [SidebarFilter?] = [.deleted]
+
     var body: some View {
         List(selection: $model.filter) {
-            Section {
-                row("All Items", "tray.full", .all)
-                row("Favourites", "star", .favourites)
-                row("Expiring Soon", "calendar.badge.exclamationmark", .expiring)
-            }
-            Section("Types") {
-                ForEach(RecordType.allCases) { t in row(t.pluralName, t.symbol, .type(t)) }
-            }
-            Section {
-                row("Deleted", "trash", .deleted)
-            }
+            Section { rows(Self.top) }
+            Section("Types") { rows(Self.types) }
+            Section { rows(Self.bottom) }
         }
         .paneBackground(.sidebar)
     }
 
-    private func row(_ title: String, _ symbol: String, _ f: SidebarFilter) -> some View {
-        Label(title, systemImage: symbol)
-            .badge(model.count(f))
-            .tag(f as SidebarFilter?)
+    private func rows(_ filters: [SidebarFilter?]) -> some View {
+        ForEach(filters, id: \.self) { f in
+            if let f {
+                Label(title(f), systemImage: symbol(f))
+                    .badge(model.count(f))
+                    .tag(f as SidebarFilter?)
+            }
+        }
+    }
+
+    private func title(_ f: SidebarFilter) -> String {
+        switch f {
+        case .all: return "All Items"
+        case .favourites: return "Favourites"
+        case .expiring: return "Expiring Soon"
+        case .deleted: return "Deleted"
+        case .type(let t): return t.pluralName
+        }
+    }
+
+    private func symbol(_ f: SidebarFilter) -> String {
+        switch f {
+        case .all: return "tray.full"
+        case .favourites: return "star"
+        case .expiring: return "calendar.badge.exclamationmark"
+        case .deleted: return "trash"
+        case .type(let t): return t.symbol
+        }
     }
 }
 
@@ -87,12 +118,14 @@ struct EntryListView: View {
         let items = model.visibleEntries
         List(items, selection: $model.selection) { e in
             HStack(spacing: 10) {
-                Image(systemName: e.type.symbol)
+                Image(systemName: e.symbol)
                     .foregroundStyle(.secondary)
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(e.title).lineLimit(1)
-                    Text(model.filter == .expiring ? expiryText(e) : e.subtitle)
+                    Text(model.filter == .expiring ? expiryText(e)
+                         : (model.sortOrder == .name ? e.subtitle
+                            : "Changed " + e.modified.formatted(date: .abbreviated, time: .omitted)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -101,7 +134,15 @@ struct EntryListView: View {
                 if e.tags.contains(Importer.reviewTag) {
                     Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).help("Imported conflict. Review it.")
                 }
-                if e.favourite { Image(systemName: "star.fill").foregroundStyle(.yellow).font(.caption) }
+                if e.favourite {
+                    // Yellow fill with a dark amber outline: plain yellow vanished on a light list.
+                    ZStack {
+                        Image(systemName: "star.fill").foregroundStyle(.yellow)
+                        Image(systemName: "star").foregroundStyle(Color(red: 0.62, green: 0.40, blue: 0.0))
+                    }
+                    .font(.body)
+                    .help("Favourite")
+                }
             }
             .padding(.vertical, 2)
         }
@@ -116,7 +157,7 @@ struct EntryListView: View {
 
     private func expiryText(_ e: Entry) -> String {
         guard let d = e.expiryDate else { return e.subtitle }
-        return (d < Date() ? "Expired " : "Expires ") + d.formatted(date: .abbreviated, time: .omitted)
+        return e.expiryText(d) + " " + d.formatted(date: .abbreviated, time: .omitted)
     }
 }
 
@@ -130,7 +171,7 @@ struct EntryDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 14) {
-                    Image(systemName: entry.type.symbol).font(.system(size: 30)).foregroundStyle(.secondary)
+                    Image(systemName: entry.symbol).font(.system(size: 30)).foregroundStyle(.secondary)
                     VStack(alignment: .leading) {
                         Text(entry.title).font(.title2.bold()).textSelection(.enabled)
                         Text(entry.type.displayName).foregroundStyle(.secondary)
@@ -138,7 +179,7 @@ struct EntryDetailView: View {
                     Spacer()
                 }
                 if let exp = entry.expiryDate {
-                    Label((exp < Date() ? "Expired " : "Expires ") + exp.formatted(date: .long, time: .omitted),
+                    Label(entry.expiryText(exp) + " " + exp.formatted(date: .long, time: .omitted),
                           systemImage: "calendar")
                         .foregroundStyle(entry.expires(within: AppModel.expiringDays) ? Color.orange : Color.secondary)
                 }

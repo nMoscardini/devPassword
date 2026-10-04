@@ -65,12 +65,16 @@ See README.md.
 
 ## Last verified
 
-2026-10-04: `scripts/smoke.sh` printed SMOKE PASSED after the security review fixes: 36 tests, 0 failures, including hostile work factor, export needs passphrase, owner-only files and snapshots removed after a credential change. Earlier: signed app built and run in Xcode by Nino with test data; Touch ID enable, unlock, cancel and wrong finger checked.
+2026-10-04: `scripts/smoke.sh` printed SMOKE PASSED with 13 record types, the mSecure importer (every field of Nino's 14-type test export), UK dates, MOT and renewal expiry, per-item icons, restore with Touch ID, and the security review fixes. Restore drill passed in the app. Signed app built and run by Nino; Touch ID enable, unlock, cancel and wrong finger checked.
 
-Not verified: Touch ID after a fingerprint change; importer on real LastPass or mSecure export files; restore from a copy downloaded from the OneDrive website onto a clean account.
+Not verified: Touch ID after a fingerprint change; full import of Nino's real mSecure export (in progress); LastPass import; restore from a copy downloaded from the OneDrive website onto a clean account.
 
 ## Session log
 
+- 2026-10-04: Types Email Account, Insurance (renewal date in Expiring Soon; mSecure 'Date' read as renewal date, to be confirmed by Nino) and Registration Code added; mSecure mapping updated. Generator and previous-password history now also apply to email passwords.
+- 2026-10-04: New record types Prescription and Vehicle (mSecure Prescriptions and Vehicle Info mapped; RX number kept as custom field). Vehicle next MOT (last MOT + 1 year) appears in Expiring Soon. Dates accept DD/MM/YYYY. Sort by name, recently changed or longest unchanged. Emergency sheet (print, no secrets printed; code written by hand). Setup screen can now restore from a backup on a new Mac: a gap against the spec's clean-device restore requirement.
+- 2026-10-04: Per-item icon choice (Entry.icon, optional, encrypted with the record; old records decode unchanged; tested).
+- 2026-10-04: mSecure importer added (MSecureImporter.swift), built from Nino's test export with every field named; all 12 mSecure types mapped, unknown types kept as secure notes with numbered fields; comma or tab files. Tests in MSecureImporterTests. Fixed: selecting a type in the sidebar did not filter.
 - 2026-10-04: Restore no longer shows an alert over the Touch ID prompt (green note on the lock screen instead); Settings closes after restore. Restore window offers Touch ID for backups of the same vault (Backup.open withUnlockedVault, tested). App is brought forward before the automatic Touch ID prompt. Touch ID is never used to reset the vault password (by design).
 - 2026-10-04: Restore drill passed. UI now says vault password, not passphrase or master password (code and file format unchanged). Fixed: cancelling the Touch ID prompt brought it straight back; the system prompt's cancel button now reads Use Vault Password.
 - 2026-10-04: Restore moved to its own step-by-step sheet (Vault > Restore from Backup…). Passphrase and recovery code fields are now hidden by default with a show button; recovery code entry shows a character count and warns when the input is not a code.
@@ -86,3 +90,5 @@ Not verified: Touch ID after a fingerprint change; importer on real LastPass or 
 - 2026-10-03: Fix: Replace Recovery Code changed the code before it was confirmed, and the idle lock could close the screen while it was being written down, leaving no known code. Now two steps (prepare, then commit after typing it back), Cancel changes nothing, idle lock paused while a code is shown. Recovery unlock shows a live character count and tells a typo apart from an old code. Row numbers removed from the code display.
 - 2026-10-03: Smoke test passed. Recovery code screen made taller and scrollable, code shown in numbered rows of four groups.
 - 2026-10-03: Spec reviewed against devDesign. Spec v1.1 adds cards, bank accounts and identity documents. Stage 1 core and Mac app written. Decisions 0001 to 0003 recorded.
+- 2026-10-04: Sidebar click-again-to-deselect reverted (a tap gesture fought List selection). All sidebar rows now built by one ForEach over SidebarFilter?, after hand-written rows stopped responding. Clear a filter by clicking All Items.
+- 2026-10-04: mSecure export writes unquoted line breaks in notes. Reader rejoins split items (MSecureImporter.rejoin). Website-less logins now matched on title plus username (false conflicts, skipped rows). Import preview lists problems first and names the item before a rejected row. scripts/csvshape.py prints a CSV's shape with no contents. Smoke passed.
