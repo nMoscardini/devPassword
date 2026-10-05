@@ -13,6 +13,7 @@ enum Screen: Equatable {
 enum SidebarFilter: Hashable {
     case all, favourites, expiring, deleted
     case type(RecordType)
+    case group(UUID)
 }
 
 /// App state. Main actor only. Decrypted records live in memory while unlocked and are
@@ -33,6 +34,11 @@ enum ListSortOrder: String, CaseIterable, Identifiable {
 final class AppModel: ObservableObject {
     @Published var screen: Screen = .locked
     @Published private(set) var entries: [Entry] = []
+    /// Groups in sidebar order. Held only while unlocked, like the records.
+    @Published private(set) var groups: [EntryGroup] = []
+    /// Set when the stored group list fails its check. Group changes are refused so a
+    /// damaged list is never overwritten.
+    private var groupsUnavailable = false
     @Published var filter: SidebarFilter? = .all
     @Published var search = ""
     @Published var selection: UUID?
@@ -61,6 +67,7 @@ final class AppModel: ObservableObject {
 
     init() {
         _ = umask(0o077)   // every file this app creates is owner-only
+        AppearanceMode.apply(UserDefaults.standard.string(forKey: AppearanceMode.key) ?? "")
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("devPassword", isDirectory: true)
         vaultURL = support.appendingPathComponent("vault.sqlite")
@@ -263,6 +270,7 @@ final class AppModel: ObservableObject {
         autoPromptSuppressed = false   // a new lock may prompt again
         vault?.lock()
         entries = []
+        groups = []
         selection = nil
         editing = nil
         search = ""
@@ -284,6 +292,15 @@ final class AppModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+        do {
+            groups = try vault.loadGroups()
+            groupsUnavailable = false
+        } catch {
+            groups = []
+            groupsUnavailable = true
+            errorMessage = "Your groups failed their integrity check and are hidden. Items are not affected. Restore from a backup if this persists."
+        }
+        if case .group(let id) = filter, !groups.contains(where: { $0.id == id }) { filter = .all }
     }
 
     var visibleEntries: [Entry] { filtered(filter ?? .all, search: search) }
@@ -298,6 +315,7 @@ final class AppModel: ObservableObject {
             case .expiring: return !e.isDeleted && e.expires(within: AppModel.expiringDays)
             case .deleted: return e.isDeleted
             case .type(let t): return !e.isDeleted && e.type == t
+            case .group(let id): return !e.isDeleted && e.groupID == id
             }
         }
         let q = search.trimmingCharacters(in: .whitespaces)
@@ -319,10 +337,10 @@ final class AppModel: ObservableObject {
         editing = Entry(type: type)
     }
 
-    func save(_ entry: Entry) {
+    func save(_ entry: Entry, touchModified: Bool = true) {
         guard let vault else { return }
         do {
-            try vault.save(entry)
+            try vault.save(entry, touchModified: touchModified)
             reload()
             selection = entry.id
         } catch {
@@ -334,6 +352,72 @@ final class AppModel: ObservableObject {
         var e = entry
         e.favourite.toggle()
         save(e)
+    }
+
+    // MARK: Groups
+
+    /// The item's group, or nil if none (or its group was deleted).
+    func group(for entry: Entry) -> EntryGroup? {
+        guard let id = entry.groupID else { return nil }
+        return groups.first { $0.id == id }
+    }
+
+    /// Files an item in a group, or takes it out with nil. Keeps its changed date.
+    func setGroup(_ entry: Entry, to id: UUID?) {
+        guard entry.groupID != id else { return }
+        var e = entry
+        e.groupID = id
+        save(e, touchModified: false)
+    }
+
+    /// Adds a new group or renames an existing one. Returns false and shows why on failure.
+    func saveGroup(_ d: GroupDraft) -> Bool {
+        var list = groups
+        let name = d.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let icon = d.icon ?? EntryGroup.defaultIcon
+        if let id = d.groupID, let i = list.firstIndex(where: { $0.id == id }) {
+            list[i].name = name
+            list[i].icon = icon
+        } else {
+            list.append(EntryGroup(name: name, icon: icon))
+        }
+        return storeGroups(list, audit: d.groupID == nil ? "group.created" : "group.changed")
+    }
+
+    func moveGroups(from source: IndexSet, to destination: Int) {
+        var list = groups
+        list.move(fromOffsets: source, toOffset: destination)
+        _ = storeGroups(list, audit: nil)
+    }
+
+    /// Deletes a group after the user has confirmed. Its items stay, with no group.
+    func deleteGroup(_ g: EntryGroup) {
+        guard let vault, !groupsUnavailable else { return }
+        do {
+            let n = try vault.deleteGroup(id: g.id)
+            reload()
+            infoMessage = n == 0 ? "Group deleted." : "Group deleted. \(n) item\(n == 1 ? " is" : "s are") no longer in a group."
+        } catch {
+            errorMessage = "The group was not deleted. \(error.localizedDescription)"
+            reload()
+        }
+    }
+
+    private func storeGroups(_ list: [EntryGroup], audit action: String?) -> Bool {
+        guard let vault else { return false }
+        guard !groupsUnavailable else {
+            errorMessage = "Groups cannot be changed while the stored list is damaged. Restore from a backup."
+            return false
+        }
+        do {
+            try vault.saveGroups(list)
+            groups = list
+            if let action { vault.audit(action) }
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
     }
 
     func moveToDeleted(_ entry: Entry) {

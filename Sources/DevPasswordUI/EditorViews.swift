@@ -77,6 +77,12 @@ struct EntryEditorView: View {
                 Section {
                     TextField("Tags, separated by commas", text: $tagsText)
                     Toggle("Favourite", isOn: $draft.favourite)
+                    Picker("Group", selection: $draft.groupID) {
+                        Text("No Group").tag(UUID?.none)
+                        ForEach(model.groups) { g in
+                            Label { Text(g.name) } icon: { IconStyle.image(g.icon) }.tag(Optional(g.id))
+                        }
+                    }
                 }
                 Section("Icon") {
                     IconPicker(selection: $draft.icon, typeSymbol: draft.type.symbol)
@@ -232,6 +238,7 @@ struct GeneratorView: View {
 struct IconPicker: View {
     @Binding var selection: String?
     let typeSymbol: String
+    var resetTitle = "Use Type Icon"
 
     static let symbols: [String] = [
         "key.horizontal", "lock", "creditcard", "building.columns", "person.text.rectangle", "note.text",
@@ -244,6 +251,7 @@ struct IconPicker: View {
         "umbrella", "shield", "bolt", "drop", "flame", "wrench.and.screwdriver",
         "sterlingsign.circle", "eurosign.circle", "dollarsign.circle", "chart.line.uptrend.xyaxis",
         "person", "person.2", "star", "bell", "calendar", "folder",
+        IconStyle.caravan, "guitars",
     ]
 
     var body: some View {
@@ -252,8 +260,7 @@ struct IconPicker: View {
                 ForEach(Self.symbols, id: \.self) { name in
                     let chosen = (selection ?? typeSymbol) == name
                     Button { selection = (name == typeSymbol) ? nil : name } label: {
-                        Image(systemName: name)
-                            .font(.system(size: 16))
+                        ItemIcon(name, size: 16)
                             .frame(width: 32, height: 32)
                             .background(chosen ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.08),
                                         in: RoundedRectangle(cornerRadius: 6))
@@ -261,10 +268,10 @@ struct IconPicker: View {
                                 .stroke(chosen ? Color.accentColor : Color.clear, lineWidth: 1.5))
                     }
                     .buttonStyle(.plain)
-                    .help(name)
+                    .help(name == IconStyle.caravan ? "caravan" : name)
                 }
             }
-            Button("Use Type Icon") { selection = nil }
+            Button(resetTitle) { selection = nil }
                 .disabled(selection == nil)
         }
     }

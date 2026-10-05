@@ -65,12 +65,17 @@ See README.md.
 
 ## Last verified
 
+2026-10-05: `scripts/smoke.sh` printed SMOKE PASSED on macOS 26.6.2: 56 tests, 0 failures, no compiler warnings, including 12 new GroupTests (sealed storage, tamper and cross-vault refusal, delete with snapshot, backup carry and strip check). Groups, icons and appearance UI checked by hand by Nino the same day: all working.
+
 2026-10-04: `scripts/smoke.sh` printed SMOKE PASSED with 13 record types, the mSecure importer (every field of Nino's 14-type test export), UK dates, MOT and renewal expiry, per-item icons, restore with Touch ID, and the security review fixes. Restore drill passed in the app. Signed app built and run by Nino; Touch ID enable, unlock, cancel and wrong finger checked.
 
 Not verified: Touch ID after a fingerprint change; full import of Nino's real mSecure export (in progress); LastPass import; restore from a copy downloaded from the OneDrive website onto a clean account.
 
 ## Session log
 
+- 2026-10-05: Appearance. Mode: System, Light or Dark for devPassword only (NSApp.appearance, set at launch and on change). Text colour per pane (sidebar, list, details, lock screen) beside each background colour; secondary text follows as a lighter shade. Warns below 4.5 to 1 contrast, or when a fixed text colour sits on the System background. All per Mac in UserDefaults. Not yet built.
+- 2026-10-05: Icons. Guitar (SF Symbol 'guitars') and caravan added to the icon picker. SF Symbols has no caravan, so it is drawn in code (IconStyle.caravanImage, template image, works in menus). Settings > Appearance > Coloured icons (per Mac, off by default): each icon gets its own colour by meaning; every type differs from its neighbours; no plain yellow. Unknown symbol names now show a dashed square instead of nothing. Not yet built.
+- 2026-10-05: Groups. Settings > Groups adds, renames, re-icons, reorders (drag) and deletes groups. One group per item, picked from a Group menu beside the star or in the editor. Group icon shown as a small badge on list rows. Groups listed in the sidebar under Favourites with counts. Delete asks, snapshots, and clears the group from its items. Group list sealed in the vault and carried by backups (decision 0006). New GroupTests. Not yet built: the Mac shell used for this session has no Swift. Nino to run scripts/smoke.sh.
 - 2026-10-04: Types Email Account, Insurance (renewal date in Expiring Soon; mSecure 'Date' read as renewal date, to be confirmed by Nino) and Registration Code added; mSecure mapping updated. Generator and previous-password history now also apply to email passwords.
 - 2026-10-04: New record types Prescription and Vehicle (mSecure Prescriptions and Vehicle Info mapped; RX number kept as custom field). Vehicle next MOT (last MOT + 1 year) appears in Expiring Soon. Dates accept DD/MM/YYYY. Sort by name, recently changed or longest unchanged. Emergency sheet (print, no secrets printed; code written by hand). Setup screen can now restore from a backup on a new Mac: a gap against the spec's clean-device restore requirement.
 - 2026-10-04: Per-item icon choice (Entry.icon, optional, encrypted with the record; old records decode unchanged; tested).

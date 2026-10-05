@@ -26,7 +26,7 @@ struct MainView: View {
             ToolbarItemGroup {
                 Menu {
                     ForEach(RecordType.allCases) { t in
-                        Button { model.beginNew(t) } label: { Label(t.displayName, systemImage: t.symbol) }
+                        Button { model.beginNew(t) } label: { Label { Text(t.displayName) } icon: { IconStyle.image(t.symbol) } }
                     }
                 } label: {
                     Label("New", systemImage: "plus")
@@ -72,8 +72,12 @@ struct SidebarView: View {
     private static let bottom: [SidebarFilter?] = [.deleted]
 
     var body: some View {
+        let groupRows: [SidebarFilter?] = model.groups.map { Optional(SidebarFilter.group($0.id)) }
         List(selection: $model.filter) {
             Section { rows(Self.top) }
+            if !groupRows.isEmpty {
+                Section("Groups") { rows(groupRows) }
+            }
             Section("Types") { rows(Self.types) }
             Section { rows(Self.bottom) }
         }
@@ -83,7 +87,7 @@ struct SidebarView: View {
     private func rows(_ filters: [SidebarFilter?]) -> some View {
         ForEach(filters, id: \.self) { f in
             if let f {
-                Label(title(f), systemImage: symbol(f))
+                Label { Text(title(f)) } icon: { ItemIcon(symbol(f)) }
                     .badge(model.count(f))
                     .tag(f as SidebarFilter?)
             }
@@ -97,6 +101,7 @@ struct SidebarView: View {
         case .expiring: return "Expiring Soon"
         case .deleted: return "Deleted"
         case .type(let t): return t.pluralName
+        case .group(let id): return model.groups.first { $0.id == id }?.name ?? "Group"
         }
     }
 
@@ -107,6 +112,7 @@ struct SidebarView: View {
         case .expiring: return "calendar.badge.exclamationmark"
         case .deleted: return "trash"
         case .type(let t): return t.symbol
+        case .group(let id): return model.groups.first { $0.id == id }?.icon ?? EntryGroup.defaultIcon
         }
     }
 }
@@ -118,7 +124,7 @@ struct EntryListView: View {
         let items = model.visibleEntries
         List(items, selection: $model.selection) { e in
             HStack(spacing: 10) {
-                Image(systemName: e.symbol)
+                ItemIcon(e.symbol)
                     .foregroundStyle(.secondary)
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 2) {
@@ -133,6 +139,12 @@ struct EntryListView: View {
                 Spacer()
                 if e.tags.contains(Importer.reviewTag) {
                     Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).help("Imported conflict. Review it.")
+                }
+                if let g = model.group(for: e) {
+                    ItemIcon(g.icon)
+                        .foregroundStyle(.secondary)
+                        .font(.body)
+                        .help("Group: \(g.name)")
                 }
                 if e.favourite {
                     // Yellow fill with a dark amber outline: plain yellow vanished on a light list.
@@ -166,15 +178,17 @@ struct EntryDetailView: View {
     let entry: Entry
     @State private var revealed: Set<String> = []
     @State private var confirmPurge = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 14) {
-                    Image(systemName: entry.symbol).font(.system(size: 30)).foregroundStyle(.secondary)
+                    ItemIcon(entry.symbol, size: 30).foregroundStyle(.secondary)
                     VStack(alignment: .leading) {
                         Text(entry.title).font(.title2.bold()).textSelection(.enabled)
-                        Text(entry.type.displayName).foregroundStyle(.secondary)
+                        Text(entry.type.displayName + (model.group(for: entry).map { "  ·  " + $0.name } ?? ""))
+                            .foregroundStyle(.secondary)
                     }
                     Spacer()
                 }
@@ -257,6 +271,7 @@ struct EntryDetailView: View {
                     Button { model.toggleFavourite(entry) } label: {
                         Label("Favourite", systemImage: entry.favourite ? "star.fill" : "star")
                     }
+                    groupMenu
                     Button { model.editing = entry } label: { Label("Edit", systemImage: "pencil") }
                         .keyboardShortcut("e", modifiers: [.command])
                     Button { model.moveToDeleted(entry) } label: { Label("Move to Deleted", systemImage: "trash") }
@@ -274,6 +289,28 @@ struct EntryDetailView: View {
 
     private func toggle(_ id: String) {
         if revealed.contains(id) { revealed.remove(id) } else { revealed.insert(id) }
+    }
+
+    /// Next to the star: pick the item's one group, or None.
+    private var groupMenu: some View {
+        let current = model.group(for: entry)
+        return Menu {
+            Picker("Group", selection: Binding(get: { current?.id }, set: { model.setGroup(entry, to: $0) })) {
+                Text("No Group").tag(UUID?.none)
+                ForEach(model.groups) { g in
+                    Label { Text(g.name) } icon: { IconStyle.image(g.icon) }.tag(Optional(g.id))
+                }
+            }
+            .pickerStyle(.inline)
+            Divider()
+            Button("Edit Groups…") {
+                model.settingsTab = .groups
+                openWindow(id: "settings")
+            }
+        } label: {
+            Label { Text("Group") } icon: { IconStyle.image(current?.icon ?? EntryGroup.defaultIcon) }
+        }
+        .help(current.map { "Group: \($0.name)" } ?? "Not in a group")
     }
 }
 

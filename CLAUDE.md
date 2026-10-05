@@ -15,6 +15,8 @@ Stage 1 Mac app working and in daily use by Nino.
 - Settings: Security, Backup, Export, Activity, Appearance.
 - Security review by ChatGPT accepted in place of a human expert (decision 0005).
 
+Groups (decision 0006), caravan and guitar icons, coloured icons, dark mode and text colours added 5 October: smoke passed (56 tests), checked by hand by Nino, all working.
+
 Recent fixes not yet confirmed by Nino on his Mac: sidebar rows all built one way (top rows were not clickable), darker favourite star.
 
 ## Next major task: AutoFill in the browser

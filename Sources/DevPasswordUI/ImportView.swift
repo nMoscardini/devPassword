@@ -74,7 +74,7 @@ struct ImportView: View {
                     List(problemsFirst(p.rows)) { r in
                         HStack {
                             Text("\(r.id)").monospacedDigit().foregroundStyle(.secondary).frame(width: 44, alignment: .trailing)
-                            Image(systemName: r.entry?.symbol ?? "xmark.octagon")
+                            IconStyle.image(r.entry?.symbol ?? "xmark.octagon")
                                 .foregroundStyle(r.entry == nil ? Color.red : Color.primary)
                                 .frame(width: 20)
                             Text(r.entry?.title ?? itemBefore(r, in: p.rows)).lineLimit(1)

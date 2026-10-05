@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import VaultCore
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case security, backup, export, activity, appearance
+    case security, backup, groups, export, activity, appearance
 
     var id: String { rawValue }
 
@@ -12,6 +12,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .security: return "Security"
         case .backup: return "Backup"
+        case .groups: return "Groups"
         case .export: return "Export"
         case .activity: return "Activity"
         case .appearance: return "Appearance"
@@ -22,6 +23,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .security: return "lock"
         case .backup: return "externaldrive"
+        case .groups: return "folder"
         case .export: return "square.and.arrow.up"
         case .activity: return "list.bullet.rectangle"
         case .appearance: return "paintpalette"
@@ -62,6 +64,7 @@ struct SettingsView: View {
                         switch tab {
                         case .security: SecuritySettings()
                         case .backup: BackupSettings()
+                        case .groups: GroupsSettings()
                         case .export: ExportSettings()
                         case .activity: ActivitySettings()
                         case .appearance: AppearanceSettings()
@@ -228,5 +231,111 @@ struct ActivitySettings: View {
             }
         }
         .overlay { if log.isEmpty { Text("No sensitive actions recorded yet.").foregroundStyle(.secondary) } }
+    }
+}
+
+/// A group being added (groupID nil) or edited.
+struct GroupDraft: Identifiable {
+    let id = UUID()
+    var groupID: UUID?
+    var name: String
+    /// Nil means the default folder icon.
+    var icon: String?
+
+    init() { groupID = nil; name = ""; icon = nil }
+    init(_ g: EntryGroup) {
+        groupID = g.id
+        name = g.name
+        icon = g.icon == EntryGroup.defaultIcon ? nil : g.icon
+    }
+}
+
+struct GroupsSettings: View {
+    @EnvironmentObject var model: AppModel
+    @State private var editing: GroupDraft?
+    @State private var deleting: EntryGroup?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            List {
+                ForEach(model.groups) { g in
+                    HStack(spacing: 10) {
+                        ItemIcon(g.icon).foregroundStyle(.secondary).frame(width: 22)
+                        Text(g.name)
+                        Spacer()
+                        Text("\(model.count(.group(g.id)))").monospacedDigit().foregroundStyle(.secondary)
+                        Button { editing = GroupDraft(g) } label: { Image(systemName: "pencil") }
+                            .help("Rename or change the icon")
+                        Button { deleting = g } label: { Image(systemName: "trash") }
+                            .help("Delete this group. Its items are kept.")
+                    }
+                    .buttonStyle(.borderless)
+                    .padding(.vertical, 2)
+                }
+                .onMove { model.moveGroups(from: $0, to: $1) }
+            }
+            .overlay {
+                if model.groups.isEmpty {
+                    ContentUnavailableView("No groups yet", systemImage: EntryGroup.defaultIcon,
+                                           description: Text("Add a group here. Then put items in it from the Group menu next to the star, or in the item's editor."))
+                }
+            }
+            Divider()
+            HStack {
+                Button { editing = GroupDraft() } label: { Label("Add Group", systemImage: "plus") }
+                Spacer()
+                Text("Drag to change the sidebar order. An item can be in one group.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(10)
+        }
+        .sheet(item: $editing) { d in GroupEditor(draft: d) }
+        .confirmationDialog("Delete the group \"\(deleting?.name ?? "")\"?",
+                            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            presenting: deleting) { g in
+            Button("Delete Group", role: .destructive) { model.deleteGroup(g) }
+        } message: { g in
+            let n = model.count(.group(g.id))
+            Text(n == 0 ? "No items are in this group."
+                 : "\(n) item\(n == 1 ? " is" : "s are") in this group. They are kept, but will no longer be in any group. A local snapshot is taken first.")
+        }
+    }
+}
+
+struct GroupEditor: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: GroupDraft
+
+    init(draft: GroupDraft) {
+        _draft = State(initialValue: draft)
+    }
+
+    private var problem: String? {
+        EntryGroup.nameProblem(draft.name, in: model.groups, except: draft.groupID)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(draft.groupID == nil ? "New Group" : "Edit Group").font(.headline)
+            TextField("Name", text: $draft.name)
+            if let p = problem, !draft.name.isEmpty {
+                Text(p).font(.caption).foregroundStyle(.orange)
+            }
+            Text("Icon").foregroundStyle(.secondary)
+            IconPicker(selection: $draft.icon, typeSymbol: EntryGroup.defaultIcon, resetTitle: "Use Folder Icon")
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(draft.groupID == nil ? "Add" : "Save") {
+                    if model.saveGroup(draft) { dismiss() }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(problem != nil)
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
     }
 }
