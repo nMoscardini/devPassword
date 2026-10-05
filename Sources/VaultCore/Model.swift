@@ -210,6 +210,9 @@ public struct Entry: Codable, Identifiable, Hashable {
     /// Icon the user chose for this item (SF Symbol name). Nil means the type's icon.
     /// Optional, so records saved before icons existed still decode.
     public var icon: String?
+    /// The one group this item belongs to (EntryGroup.id). Nil means no group.
+    /// Optional, so records saved before groups existed still decode.
+    public var groupID: UUID?
 
     public init(id: UUID = UUID(), type: RecordType, title: String = "") {
         self.id = id
@@ -227,6 +230,7 @@ public struct Entry: Codable, Identifiable, Hashable {
         self.modified = Date()
         self.deletedAt = nil
         self.icon = nil
+        self.groupID = nil
     }
 
     public subscript(field key: String) -> String {

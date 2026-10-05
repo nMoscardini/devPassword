@@ -205,20 +205,22 @@ public final class Vault: @unchecked Sendable {
         return LoadResult(entries: entries, failedIDs: failed)
     }
 
+    /// `touchModified: false` keeps the record's changed date, for filing changes such as
+    /// moving it to a group, so "Longest unchanged first" still means the content.
     @discardableResult
-    public func save(_ entry: Entry) throws -> Entry {
-        try saveAll([entry])[0]
+    public func save(_ entry: Entry, touchModified: Bool = true) throws -> Entry {
+        try saveAll([entry], touchModified: touchModified)[0]
     }
 
     /// Saves all entries in one transaction: all or nothing.
     @discardableResult
-    public func saveAll(_ entries: [Entry]) throws -> [Entry] {
+    public func saveAll(_ entries: [Entry], touchModified: Bool = true) throws -> [Entry] {
         let key = try requireKey()
         let header = self.header
         let saved: [Entry] = try db.transaction {
             var out: [Entry] = []
             for var e in entries {
-                e.modified = Date()
+                if touchModified { e.modified = Date() }
                 let current = try db.query("SELECT revision FROM entries WHERE entry_id = ?",
                                            [.text(e.id.uuidString)]).first?.first?.int ?? 0
                 let revision = Int(current) + 1
@@ -273,6 +275,54 @@ public final class Vault: @unchecked Sendable {
 
     private func decrypt(_ s: SealedEntry, key: SymmetricKey, header: VaultHeader) throws -> Entry {
         try Vault.decryptEntry(s, key: key, header: header)
+    }
+
+    // MARK: Groups
+
+    /// The vault's groups in sidebar order. Names and icons are sealed under the vault key in
+    /// the meta table, so they are encrypted on disk and travel with backups.
+    public func loadGroups() throws -> [EntryGroup] {
+        let key = try requireKey()
+        guard let sealed = try sealedGroups() else { return [] }
+        return try Vault.openGroups(sealed, key: key, header: header)
+    }
+
+    /// Replaces the whole group list. Order is the sidebar order.
+    public func saveGroups(_ groups: [EntryGroup]) throws {
+        let key = try requireKey()
+        try EntryGroup.validate(groups)
+        let sealed = try VaultCrypto.seal(try JSONEncoder().encode(groups), key: key, context: header.groupsContext())
+        try db.transaction {
+            try db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('groups', ?)", [.blob(sealed)])
+        }
+        Log.vault.info("event=groups.saved count=\(groups.count, privacy: .public)")
+    }
+
+    /// Deletes a group and takes every record out of it. The records are kept.
+    /// Rewrites records, so a snapshot comes first (N3). Returns how many records were in it.
+    @discardableResult
+    public func deleteGroup(id: UUID) throws -> Int {
+        var groups = try loadGroups()
+        guard groups.contains(where: { $0.id == id }) else { return 0 }
+        let members = try loadAll().entries.filter { $0.groupID == id }
+        try snapshot(reason: "group-delete")
+        if !members.isEmpty {
+            try saveAll(members.map { e in var e = e; e.groupID = nil; return e }, touchModified: false)
+        }
+        groups.removeAll { $0.id == id }
+        try saveGroups(groups)
+        audit("group.deleted")
+        return members.count
+    }
+
+    func sealedGroups() throws -> Data? {
+        try db.query("SELECT value FROM meta WHERE key = 'groups'").first?.first?.blob
+    }
+
+    /// Fails closed: a changed or swapped group list is refused, never shown.
+    static func openGroups(_ sealed: Data, key: SymmetricKey, header: VaultHeader) throws -> [EntryGroup] {
+        let data = try VaultCrypto.open(sealed, key: key, context: header.groupsContext())
+        return try JSONDecoder().decode([EntryGroup].self, from: data)
     }
 
     // MARK: Secrets

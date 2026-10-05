@@ -43,6 +43,10 @@ public struct VaultHeader: Codable, Equatable {
         Data("devPassword-entry-v1|\(vaultID.uuidString)|\(entryID.uuidString)|\(revision)|\(payloadVersion)|\(keyID.uuidString)".utf8)
     }
 
+    func groupsContext() -> Data {
+        Data("devPassword-groups-v1|\(vaultID.uuidString)|\(keyID.uuidString)".utf8)
+    }
+
     func manifestContext() -> Data {
         Data("devPassword-manifest-v1|\(vaultID.uuidString)|\(keyID.uuidString)".utf8)
     }

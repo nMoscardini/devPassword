@@ -14,12 +14,16 @@ public struct BackupArchive: Codable {
     public var header: VaultHeader
     public var entries: [SealedEntry]
     public var sealedManifest: Data
+    /// The vault's group list, still sealed. Nil in backups made before groups existed.
+    public var sealedGroups: Data?
 }
 
 struct BackupManifest: Codable {
     var entryCount: Int
     var digest: Data
     var createdAt: Date
+    /// SHA-256 of sealedGroups. Nil when the backup has no groups.
+    var groupsDigest: Data?
 }
 
 public struct BackupPreview {
@@ -43,12 +47,15 @@ public enum Backup {
     public static func makeArchive(from vault: Vault) throws -> BackupArchive {
         let key = try vault.requireKey()
         let entries = try vault.allSealed()
+        let groups = try vault.sealedGroups()
         let created = Date()
-        let manifest = BackupManifest(entryCount: entries.count, digest: try digest(entries), createdAt: created)
+        let manifest = BackupManifest(entryCount: entries.count, digest: try digest(entries), createdAt: created,
+                                      groupsDigest: groups.map { Data(SHA256.hash(data: $0)) })
         let sealedManifest = try VaultCrypto.seal(try JSONEncoder().encode(manifest), key: key,
                                                   context: vault.header.manifestContext())
         return BackupArchive(format: BackupArchive.formatName, formatVersion: 1, createdAt: created,
-                             header: vault.header, entries: entries, sealedManifest: sealedManifest)
+                             header: vault.header, entries: entries, sealedManifest: sealedManifest,
+                             sealedGroups: groups)
     }
 
     public static func write(_ archive: BackupArchive, to url: URL) throws {
@@ -103,6 +110,16 @@ public enum Backup {
         }
         guard try digest(archive.entries) == manifest.digest else {
             throw VaultError.corrupt("Backup records do not match the manifest")
+        }
+        guard manifest.groupsDigest == archive.sealedGroups.map({ Data(SHA256.hash(data: $0)) }) else {
+            throw VaultError.corrupt("Backup groups do not match the manifest")
+        }
+        if let groups = archive.sealedGroups {
+            do {
+                _ = try Vault.openGroups(groups, key: key, header: archive.header)
+            } catch {
+                throw VaultError.corrupt("The backup's group list failed its integrity check")
+            }
         }
         var counts: [RecordType: Int] = [:]
         var deleted = 0
@@ -166,6 +183,9 @@ public enum Backup {
                 try db.run("INSERT INTO entries (entry_id, key_id, payload_version, revision, sealed) VALUES (?, ?, ?, ?, ?)",
                            [.text(s.entryID.uuidString), .text(s.keyID.uuidString),
                             .int(Int64(s.payloadVersion)), .int(Int64(s.revision)), .blob(s.sealed)])
+            }
+            if let groups = opened.archive.sealedGroups {
+                try db.run("INSERT INTO meta (key, value) VALUES ('groups', ?)", [.blob(groups)])
             }
             try db.run("INSERT INTO audit (at, action) VALUES (?, 'vault.restored_from_backup')",
                        [.int(Int64(Date().timeIntervalSince1970))])
