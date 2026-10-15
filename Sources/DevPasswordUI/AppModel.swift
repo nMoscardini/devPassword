@@ -13,6 +13,8 @@ enum Screen: Equatable {
 
 enum SidebarFilter: Hashable {
     case all, favourites, expiring, deleted
+    /// Logins imported from Apple Passwords (decision 0007).
+    case apple
     case type(RecordType)
     case group(UUID)
 }
@@ -47,6 +49,11 @@ final class AppModel: ObservableObject {
     @Published var showGenerator = false
     @Published var showImport = false
     @Published var showAppleImport = false
+    /// Hides Apple-imported logins from every list except the Apple Passwords row and Favourites. Per Mac.
+    @Published var hideAppleLogins = UserDefaults.standard.bool(forKey: "hideAppleLogins") {
+        didSet { UserDefaults.standard.set(hideAppleLogins, forKey: "hideAppleLogins") }
+    }
+    var hasAppleLogins: Bool { entries.contains { $0.isAppleSnapshot && !$0.isDeleted } }
     @Published var showRestore = false
     @Published var sortOrder: ListSortOrder = ListSortOrder(rawValue: UserDefaults.standard.string(forKey: "sortOrder") ?? "") ?? .name {
         didSet { UserDefaults.standard.set(sortOrder.rawValue, forKey: "sortOrder") }
@@ -374,7 +381,12 @@ final class AppModel: ObservableObject {
             case .deleted: return e.isDeleted
             case .type(let t): return !e.isDeleted && e.type == t
             case .group(let id): return !e.isDeleted && e.groupID == id
+            case .apple: return !e.isDeleted && e.isAppleSnapshot
             }
+        }
+        // Favourites were chosen by hand, so they stay visible.
+        if hideAppleLogins && f != .apple && f != .favourites {
+            list = list.filter { !$0.isAppleSnapshot }
         }
         let q = search.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty {

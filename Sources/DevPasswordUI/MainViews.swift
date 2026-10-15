@@ -40,6 +40,15 @@ struct MainView: View {
                     Label("Sort", systemImage: "arrow.up.arrow.down")
                 }
                 .help("Sort by name or by when items were last changed")
+                if model.hasAppleLogins {
+                    Toggle(isOn: $model.hideAppleLogins) {
+                        Label("Hide Apple Logins", systemImage: "apple.logo")
+                    }
+                    .toggleStyle(.button)
+                    .help(model.hideAppleLogins
+                          ? "Apple logins are hidden. Click to show them. They are always in the Apple Passwords row."
+                          : "Hide logins imported from Apple Passwords (Shift-Command-A)")
+                }
                 Button { model.showGenerator = true } label: { Label("Generate", systemImage: "wand.and.stars") }
                     .help("Generate a password")
                 Button { model.lockManually() } label: { Label("Lock", systemImage: "lock") }
@@ -92,7 +101,7 @@ struct SidebarView: View {
                 Section("Groups") { rows(groupRows) }
             }
             Section("Types") { rows(Self.types) }
-            Section { rows(Self.bottom) }
+            Section { rows((model.hasAppleLogins ? [Optional(SidebarFilter.apple)] : []) + Self.bottom) }
         }
         .paneBackground(.sidebar)
     }
@@ -113,6 +122,7 @@ struct SidebarView: View {
         case .favourites: return "Favourites"
         case .expiring: return "Expiring Soon"
         case .deleted: return "Deleted"
+        case .apple: return "Apple Passwords"
         case .type(let t): return t.pluralName
         case .group(let id): return model.groups.first { $0.id == id }?.name ?? "Group"
         }
@@ -124,6 +134,7 @@ struct SidebarView: View {
         case .favourites: return "star"
         case .expiring: return "calendar.badge.exclamationmark"
         case .deleted: return "trash"
+        case .apple: return "apple.logo"
         case .type(let t): return t.symbol
         case .group(let id): return model.groups.first { $0.id == id }?.icon ?? EntryGroup.defaultIcon
         }

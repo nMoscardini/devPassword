@@ -35,6 +35,9 @@ public struct DevPasswordScenes: Scene {
                 Divider()
                 Button("Import from Apple Passwords…") { model.showAppleImport = true }
                     .disabled(!model.isUnlocked)
+                Toggle("Hide Apple Logins", isOn: $model.hideAppleLogins)
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
+                    .disabled(!model.isUnlocked)
                 Button("Import CSV…") { model.showImport = true }
                     .disabled(!model.isUnlocked)
                 Button("Back Up Now") { model.backupNow() }
