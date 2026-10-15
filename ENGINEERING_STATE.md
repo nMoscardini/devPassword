@@ -4,7 +4,7 @@ Authoritative state document (devDesign principle 9). Update at the end of every
 
 ## Status
 
-Class: Personal. Version: 0.1. Stage 1 (local vault, Mac) working and in daily trial with test data: Touch ID, import, backup, appearance settings. Not yet trusted with real records (see Open items).
+Class: Personal. Version: 0.1. Stage 1 (local vault, Mac) working and in daily use with Nino's real records (248 imported from mSecure). Vault password changed 5 October after the earlier one was exposed.
 
 ## What it is
 
@@ -29,13 +29,16 @@ A password and personal-records manager for Nino's Mac and iPhone, with an encry
 | 2026-10-04 | Act on ChatGPT security review; AI review accepted in place of a human expert | No human reviewer available | 0005 |
 | 2026-10-03 | Touch ID via signed Xcode app, Keychain-held key | Nino asked; spec F10 | 0004 |
 | 2026-10-03 | Record types: login, secure note, payment card, bank account, identity document, plus custom fields | Spec v1.1 | - |
+| 2026-10-11 | Apple Passwords holds live logins and passkeys; devPassword is the system of record with a one-way login snapshot | No Apple API; AutoFill risk; Nino wants passkeys with biometrics | 0007 |
 
 ## Open items
 
-- Change the master passphrase before real data goes in: the current test passphrase was shown in a screenshot during the restore test on 4 October (N1).
-
-- Reuse check against Apple Passwords and KeePass-format apps. Waits on Nino. Due before Stage 2.
-- Stage 0 proof: signing, Keychain access control, Touch ID keyboard, CloudKit records, AutoFill in Nino's browser.
+- Credential exchange test (decision 0007): can devPassword receive logins from Passwords on macOS 26 without becoming a browser AutoFill provider? Decides the import route.
+- Migration (decision 0007): devPassword and LastPass logins into Apple Passwords by CSV, counts checked, CSVs deleted, first snapshot import, LastPass retired after a check period.
+- Build: second secret on bank records and "Pick characters" on any secret field (0007 amendment). Synthetic test values only.
+- Build: read-only login entries, import diff and history, snapshot age and refresh prompt, record-to-login links. Remove login editing and the generator.
+- Nino: turn on iCloud Advanced Data Protection; set an Apple account recovery contact and a Legacy Contact; decide on a hardware security key as a second passkey for critical accounts (primary email, Apple account, banks).
+- Stage 0 proof, reduced: signing and Keychain access control on iPhone, KDF timing on iPhone. AutoFill and CloudKit dropped (decision 0007).
 - Off-site copy of the backup folder and a written loss and downtime tolerance (N4). Waits on Nino choosing the destination.
 - Backup register row in `~/devDesign/REFERENCE_ARCHITECTURE.md`. Add once the destination is known.
 - Sample CSV exports from LastPass and mSecure (synthetic or a few dummy records) to tune the importer's column guesses.
@@ -65,6 +68,8 @@ See README.md.
 
 ## Last verified
 
+2026-10-15: `scripts/smoke.sh` printed SMOKE PASSED: 63 tests (7 new BankingTests), 0 failures, no compiler warnings. Signed app built from Xcode and checked by hand by Nino: inline Touch ID glyph on the lock screen, fingerprint unlocks with no floating panel, Command-L locks. Not checked by hand yet: vault password unlock after Command-L, wrong finger, recovery code toggle, banking second secret and Pick characters.
+
 2026-10-05: `scripts/smoke.sh` printed SMOKE PASSED on macOS 26.6.2: 56 tests, 0 failures, no compiler warnings, including 12 new GroupTests (sealed storage, tamper and cross-vault refusal, delete with snapshot, backup carry and strip check). Groups, icons and appearance UI checked by hand by Nino the same day: all working.
 
 2026-10-04: `scripts/smoke.sh` printed SMOKE PASSED with 13 record types, the mSecure importer (every field of Nino's 14-type test export), UK dates, MOT and renewal expiry, per-item icons, restore with Touch ID, and the security review fixes. Restore drill passed in the app. Signed app built and run by Nino; Touch ID enable, unlock, cancel and wrong finger checked.
@@ -73,6 +78,9 @@ Not verified: Touch ID after a fingerprint change; full import of Nino's real mS
 
 ## Session log
 
+- 2026-10-15: Lock screen Touch ID now inline, like Apple Passwords: no floating panel. New `TouchIDSensor` (LAAuthenticationView from LocalAuthenticationEmbeddedUI) bound to its own LAContext; once on screen it evaluates biometrics, and the evaluated context is passed to the Keychain read (kSecUseAuthenticationContext), so the Keychain shows nothing more. Keychain access rule unchanged (biometryCurrentSet, this device only); stored-key check unchanged. Listens whenever the lock screen shows and the app is active, including straight after Command-L (no panel, so no reason to hold back). Stops on unlock and while the recovery code is shown. Wrong finger: message, click the glyph to retry. Lockout: glyph hidden, vault password. "Unlock with Touch ID" button removed. Lock screen icon now one piece, as Nino asked: live fingerprint glyph in a white disc with a teal padlock badge (like the macOS Touch ID icon). Nino saw the floating panel again on 15 October: evaluateAccessControl also raised the panel and the disc was empty: the glyph had zero size (centred with no size constraints). Glyph now pinned to the host edges, laid out before evaluating; back to evaluatePolicy; and the Keychain read on this path sets interactionNotAllowed, so it can never raise the panel; if the Keychain still wants to ask, the lock screen says so. Restore window still uses the system panel. Not yet compiled or tested (no Swift in the session VM). Nino to run `scripts/smoke.sh` and check by hand: no panel appears, Touch ID unlocks, typing the password still works, app in background then foreground re-listens, wrong finger, recovery code toggle.
+- 2026-10-11: Decision 0007 (Apple Passwords for live logins and passkeys, devPassword the system of record) and its banking amendment. Built, NOT yet compiled or tested (no Swift toolchain in the session VM): `LoginMaster` on Entry (optional, old records decode), login field `secondSecret` (concealed, so not searchable; flows through CSV export/import as `field:secondSecret`), `CharacterPicker` in VaultCore, `CharacterPickView` popover on every concealed field (shows only the asked-for characters, hides after 20s, no clipboard, audits `field.characters_picked` without positions), master badge on the login detail, master picker in the login editor. Tests: `BankingTests` (7). Master is not in the CSV export, same as groups. Nino to run `scripts/smoke.sh` and check by hand.
+- 2026-10-05: Vault password changed by Nino (the old one was shown in a screenshot on 4 October), fresh backup made, all older backups deleted from OneDrive. First attempt was refused as a wrong current password, which is correct behaviour; the message now says "The current vault password is not correct. Nothing was changed." (wording only, not yet built).
 - 2026-10-05: Appearance. Mode: System, Light or Dark for devPassword only (NSApp.appearance, set at launch and on change). Text colour per pane (sidebar, list, details, lock screen) beside each background colour; secondary text follows as a lighter shade. Warns below 4.5 to 1 contrast, or when a fixed text colour sits on the System background. All per Mac in UserDefaults. Not yet built.
 - 2026-10-05: Icons. Guitar (SF Symbol 'guitars') and caravan added to the icon picker. SF Symbols has no caravan, so it is drawn in code (IconStyle.caravanImage, template image, works in menus). Settings > Appearance > Coloured icons (per Mac, off by default): each icon gets its own colour by meaning; every type differs from its neighbours; no plain yellow. Unknown symbol names now show a dashed square instead of nothing. Not yet built.
 - 2026-10-05: Groups. Settings > Groups adds, renames, re-icons, reorders (drag) and deletes groups. One group per item, picked from a Group menu beside the star or in the editor. Group icon shown as a small badge on list rows. Groups listed in the sidebar under Favourites with counts. Delete asks, snapshots, and clears the group from its items. Group list sealed in the vault and carried by backups (decision 0006). New GroupTests. Not yet built: the Mac shell used for this session has no Swift. Nino to run scripts/smoke.sh.

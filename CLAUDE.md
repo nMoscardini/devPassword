@@ -19,14 +19,16 @@ Groups (decision 0006), caravan and guitar icons, coloured icons, dark mode and 
 
 Recent fixes not yet confirmed by Nino on his Mac: sidebar rows all built one way (top rows were not clickable), darker favourite star.
 
-## Next major task: AutoFill in the browser
+## Direction (11 October 2026): decision 0007
 
-The spec's riskiest assumption. Not started. Plan:
+Apple Passwords holds live logins and passkeys. devPassword is the system of record: master for all other records, plus a read-only, dated snapshot and history of logins, imported one way from Apple. No editing of Apple-mastered logins (devPassword-mastered logins, for sites Apple cannot fill, stay editable), no generator, no AutoFill, no passkey keys, no write-back to Apple after the one-off migration. Read `docs/decisions/0007-apple-passwords-for-logins.md` before touching logins or the iPhone app.
 
-1. Nino uses Safari and Chrome (stated 4 October 2026). Both must be tested. Test site: a public practice login page such as https://the-internet.herokuapp.com/login (published dummy credentials), so no real account is involved.
-2. Proof first (about half a day): a minimal AutoFill credential provider extension offering one hard-coded synthetic login, tested in Safari and his browser. Answers whether that browser uses macOS third-party providers.
-3. If it works: decision record reversing 0002 (extension must be sandboxed), move the vault to a shared App Group container by scripted migration with a snapshot first, share the Touch ID Keychain item with the extension, publish website and username (never passwords) to the credential identity store, recorded as a decision.
-4. If it does not: decide between a browser extension (large, new attack surface) and a quick-fill window with a global shortcut and clipboard clearing (small, works everywhere).
+Next tasks, in order:
+1. Credential exchange test (half a day): receive logins from Passwords on macOS 26 without becoming a browser AutoFill provider. Synthetic logins only. Fallback: watched-folder CSV import with immediate delete.
+2. Snapshot import: read-only login entries, diff against the previous import, history, snapshot age and refresh prompt.
+3. One-off migration of devPassword and LastPass logins into Apple Passwords.
+4. iPhone: read-only viewer over the latest encrypted backup, Face ID unlock.
+5. Banking (0007 amendment): per-login master (Apple default, devPassword for sites Apple cannot fill), duplicate-master flag on import, stale-snapshot flag on bank logins. Second secrets: secondary password / memorable word on bank records, "Pick characters" on any secret field. Can be built before 1-4: it does not depend on them. Also needed in the iPhone viewer.
 
 Other open items: see ENGINEERING_STATE.md.
 

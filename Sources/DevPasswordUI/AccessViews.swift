@@ -153,8 +153,40 @@ struct UnlockView: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Image(systemName: "lock.fill").font(.system(size: 44)).foregroundStyle(.secondary)
+            if model.showTouchIDSensor && !useRecovery {
+                // Fingerprint in a white disc with a padlock badge, like the macOS Touch ID icon.
+                // The fingerprint is Apple's live sensor glyph: it reacts to the finger and shakes on a miss.
+                ZStack(alignment: .bottomTrailing) {
+                    Circle()
+                        .fill(Color.white)
+                        .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
+                        .frame(width: 60, height: 60)
+                        .overlay(
+                            TouchIDSensor(onReady: model.sensorReady,
+                                          onClick: { model.rearmTouchIDSensor(force: true) })
+                                .id(model.sensorID)
+                                .frame(width: 40, height: 40)
+                        )
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(LinearGradient(colors: [Color(red: 0.20, green: 0.50, blue: 0.60),
+                                                      Color(red: 0.08, green: 0.30, blue: 0.40)],
+                                             startPoint: .top, endPoint: .bottom))
+                        .frame(width: 24, height: 24)
+                        .overlay(Image(systemName: "lock.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white))
+                        .offset(x: 6, y: 4)
+                }
+                .frame(width: 66, height: 64)
+                .accessibilityLabel("\(model.biometricName). Click to try again.")
+            } else {
+                Image(systemName: "lock.fill").font(.system(size: 44)).foregroundStyle(.secondary)
+            }
             Text("devPassword is locked").font(.title.bold())
+            if model.showTouchIDSensor && !useRecovery {
+                Text("\(model.biometricName) or enter your vault password to unlock.")
+                    .foregroundStyle(.secondary)
+            }
             if let notice = model.lockNotice {
                 Label(notice, systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
@@ -166,15 +198,9 @@ struct UnlockView: View {
                 CodeProgress(typed: secret, ok: (try? RecoveryCode.parse(secret)) != nil)
                     .frame(width: 380, alignment: .leading)
             }
-            if model.touchIDEnabled && model.touchIDAvailable && !useRecovery {
-                Button {
-                    Task { await model.unlockWithTouchID() }
-                } label: {
-                    Label("Unlock with \(model.biometricName)", systemImage: "touchid")
-                        .frame(width: 360)
-                }
-                .controlSize(.large)
-                .disabled(model.busy)
+            if let message = model.sensorMessage, !useRecovery {
+                Text(message).font(.callout).foregroundStyle(.secondary)
+                    .frame(width: 380, alignment: .leading)
             }
             HStack {
                 Button(useRecovery ? "Use vault password" : "Forgot vault password? Use recovery code") {
@@ -193,9 +219,9 @@ struct UnlockView: View {
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .paneBackground(.lockScreen)
-        .onAppear {
-            // App launch or idle lock: prompt at once. Not straight after Command-L.
-            if !model.lockedManually { model.autoPromptTouchID() }
+        .onChange(of: useRecovery) { _, recovery in
+            // The sensor leaves the screen while the recovery code is shown: stop it listening.
+            if recovery { model.stopTouchIDSensor() } else { model.rearmTouchIDSensor() }
         }
     }
 

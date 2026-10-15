@@ -197,6 +197,12 @@ struct EntryDetailView: View {
                           systemImage: "calendar")
                         .foregroundStyle(entry.expires(within: AppModel.expiringDays) ? Color.orange : Color.secondary)
                 }
+                if entry.type == .login {
+                    Label(entry.master.map { "Master: " + $0.displayName } ?? "Master not set",
+                          systemImage: entry.master == .apple ? "apple.logo" : "lock.shield")
+                        .foregroundStyle(.secondary)
+                        .help(entry.master?.explanation ?? "Choose Apple Passwords or devPassword in Edit (decision 0007).")
+                }
                 if entry.isDeleted {
                     Label("In Deleted. Put it back, or delete it permanently.", systemImage: "trash")
                         .foregroundStyle(.orange)
@@ -315,6 +321,8 @@ struct EntryDetailView: View {
 }
 
 struct FieldRow: View {
+    @EnvironmentObject var model: AppModel
+    @State private var showPick = false
     let id: String
     let label: String
     let value: String
@@ -352,6 +360,15 @@ struct FieldRow: View {
                     Image(systemName: isRevealed ? "eye.slash" : "eye")
                 }
                 .help(isRevealed ? "Hide" : "Reveal")
+                Button {
+                    showPick = true
+                } label: {
+                    Image(systemName: "character.cursor.ibeam")
+                }
+                .help("Pick characters, for sites that ask for, say, the 2nd, 5th and 7th")
+                .popover(isPresented: $showPick, arrowEdge: .bottom) {
+                    CharacterPickView(label: label, value: value).environmentObject(model)
+                }
             }
             Button {
                 Clipboard.copy(value, concealed: concealed)

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import LocalAuthentication
 import VaultCore
 
 enum Screen: Equatable {
@@ -184,41 +185,93 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// `automatic`: started by the app, not a button press. Errors stay quiet then; the button shows them.
-    func unlockWithTouchID(automatic: Bool = false) async {
+    /// `context`: from the inline sensor, already evaluated, so no system panel shows.
+    /// With no context (Restore window, older path) macOS shows its floating Touch ID panel.
+    func unlockWithTouchID(automatic: Bool = false, context: LAContext? = nil) async {
         guard let vault, touchIDEnabled, !busy else { return }
         busy = true
-        defer { busy = false; touchIDPromptPending = false }
+        defer { busy = false }
         do {
-            try await Task.detached { try vault.unlockWithBiometrics(reason: "unlock your vault") }.value
+            try await Task.detached { try vault.unlockWithBiometrics(reason: "unlock your vault", context: context) }.value
             didUnlock()
         } catch VaultError.biometricCancelled {
-            // User chose to type the vault password. Do not ask again until the next lock.
-            autoPromptSuppressed = true
+            // User chose to type the vault password.
         } catch {
-            autoPromptSuppressed = true
             if !automatic { errorMessage = error.localizedDescription }
         }
     }
 
-    private var touchIDPromptPending = false
-    /// Set when the Touch ID prompt is cancelled or fails. Cleared by the next lock or unlock.
-    /// Stops the prompt coming straight back when macOS returns focus to the app after Cancel.
-    private var autoPromptSuppressed = false
+    // MARK: Inline Touch ID sensor (like Apple Passwords)
 
-    /// Shows the Touch ID prompt without a click, when the lock screen is in front of the user.
-    /// Called on app activation, Mac wake or unlock, and after an idle lock. Never after a manual lock.
-    func autoPromptTouchID() {
-        guard screen == .locked, touchIDEnabled, touchIDAvailable, !busy, !touchIDPromptPending, !autoPromptSuppressed,
-              NSApp.isActive, vault != nil else { return }
-        touchIDPromptPending = true
-        NSApp.activate(ignoringOtherApps: true)
+    /// Changing this makes the lock screen build a fresh sensor, which starts listening for a finger.
+    @Published var sensorID = UUID()
+    /// One line under the vault password field after a failed or locked-out Touch ID attempt.
+    @Published var sensorMessage: String?
+    /// The context the sensor is listening on. Nil when not listening.
+    private var sensorContext: LAContext?
+    /// Set after too many failed fingers. macOS then needs the Mac password; we offer the vault password.
+    private var sensorLockedOut = false
+
+    var showTouchIDSensor: Bool {
+        screen == .locked && touchIDEnabled && touchIDAvailable && vault != nil && !sensorLockedOut
+    }
+
+    /// Called by the sensor view once it is on screen. Starts listening unless the app is in the background.
+    func sensorReady(_ context: LAContext) {
+        guard showTouchIDSensor, !busy, NSApp.isActive, sensorContext == nil else { return }
+        sensorContext = context
         Task {
-            // Let window changes (restore, unlock screen) finish so the prompt opens over a settled, active app.
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard screen == .locked else { touchIDPromptPending = false; return }
-            await unlockWithTouchID(automatic: true)
+            do {
+                // The inline glyph supports policy evaluation (evaluateAccessControl raised the
+                // floating panel on 15 October). The Keychain read that follows reuses this match.
+                _ = try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+                                                     localizedReason: "unlock your vault")
+                sensorMessage = nil
+                await unlockWithTouchID(context: context)
+            } catch let error as LAError {
+                handleSensorError(error)
+            } catch {
+                sensorMessage = error.localizedDescription
+            }
+            if sensorContext === context { sensorContext = nil }
         }
+    }
+
+    private func handleSensorError(_ error: LAError) {
+        switch error.code {
+        case .appCancel, .systemCancel, .userCancel, .userFallback, .notInteractive:
+            break   // focus moved away or we stopped it. Listens again when the app is next active.
+        case .authenticationFailed:
+            sensorMessage = "Fingerprint not recognised. Click the fingerprint to try again, or type your vault password."
+        case .biometryLockout:
+            sensorLockedOut = true
+            sensorMessage = "\(biometricName) is locked after too many tries. Type your vault password."
+        default:
+            sensorMessage = error.localizedDescription
+        }
+    }
+
+    /// Starts a fresh sensor. `force`: stop any attempt in progress first (a click on the glyph).
+    func rearmTouchIDSensor(force: Bool = false) {
+        guard showTouchIDSensor, !busy, NSApp.isActive else { return }
+        if sensorContext != nil {
+            guard force else { return }   // already listening
+            stopTouchIDSensor()
+        }
+        sensorMessage = nil
+        sensorID = UUID()
+    }
+
+    /// Stops listening, e.g. on unlock or when switching to the recovery code.
+    func stopTouchIDSensor() {
+        sensorContext?.invalidate()
+        sensorContext = nil
+    }
+
+    /// Called on app activation, Mac wake or unlock, and after an idle lock.
+    /// Listens for a finger again if the lock screen is showing. No panel, so no harm in asking.
+    func autoPromptTouchID() {
+        rearmTouchIDSensor()
     }
 
     /// Turns Touch ID on or off for this vault. Turning on needs the vault unlocked.
@@ -247,9 +300,10 @@ final class AppModel: ObservableObject {
     }
 
     private func didUnlock() {
+        stopTouchIDSensor()
+        sensorMessage = nil
         lockNotice = nil
         lockedManually = false
-        autoPromptSuppressed = false
         reload()
         screen = .unlocked
         touch()
@@ -267,7 +321,6 @@ final class AppModel: ObservableObject {
 
     func lock() {
         guard screen == .unlocked || screen == .newPassphrase else { return }
-        autoPromptSuppressed = false   // a new lock may prompt again
         vault?.lock()
         entries = []
         groups = []
@@ -278,6 +331,9 @@ final class AppModel: ObservableObject {
         showImport = false
         showRestore = false
         Clipboard.clearIfOurs()
+        sensorLockedOut = false
+        sensorMessage = nil
+        sensorID = UUID()
         screen = .locked
     }
 
@@ -475,6 +531,9 @@ final class AppModel: ObservableObject {
             try await Task.detached { try vault.changePassphrase(current: current, new: new) }.value
             infoMessage = "Vault password changed. Local snapshots made with the old vault password were removed. Encrypted backups made before today still open with the OLD vault password: make a new backup now, and delete older ones if you think the old vault password is known to anyone."
             return true
+        } catch VaultError.wrongSecret {
+            errorMessage = "The current vault password is not correct. Nothing was changed."
+            return false
         } catch {
             errorMessage = error.localizedDescription
             return false
@@ -566,6 +625,9 @@ final class AppModel: ObservableObject {
     // MARK: Auto-lock (spec section 5)
 
     func touch() { lastActivity = Date() }
+
+    /// Activity entry for "Pick characters". Records the action only, never positions or characters.
+    func auditCharactersPicked() { vault?.audit("field.characters_picked") }
 
     private func startLockMonitors() {
         _ = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel]) { [weak self] event in

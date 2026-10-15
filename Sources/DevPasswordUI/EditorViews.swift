@@ -31,6 +31,17 @@ struct EntryEditorView: View {
                             .font(.body)
                             .frame(minHeight: 44)
                     }
+                    Section("Master (decision 0007)") {
+                        Picker("Master", selection: $draft.master) {
+                            Text("Not set").tag(LoginMaster?.none)
+                            ForEach(LoginMaster.allCases) { m in
+                                Text(m.displayName).tag(LoginMaster?.some(m))
+                            }
+                        }
+                        if let m = draft.master {
+                            Text(m.explanation).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 if !draft.type.fieldDefs.isEmpty {
                     Section(draft.type.displayName) {

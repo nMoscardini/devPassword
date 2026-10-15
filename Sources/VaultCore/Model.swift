@@ -13,6 +13,27 @@ public enum FieldKind: String, Codable, CaseIterable, Hashable {
     }
 }
 
+/// Which store is the master for a login (decision 0007). Nil means not decided yet.
+public enum LoginMaster: String, Codable, CaseIterable, Identifiable, Hashable {
+    case apple, devPassword
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .apple: return "Apple Passwords"
+        case .devPassword: return "devPassword"
+        }
+    }
+
+    public var explanation: String {
+        switch self {
+        case .apple: return "Apple Passwords is the master. Change the password there, then refresh the snapshot."
+        case .devPassword: return "devPassword is the master, for sites Apple cannot fill. Do not save it in Apple Passwords."
+        }
+    }
+}
+
 /// One field in a record type's template. Keys are unique across all types.
 public struct FieldDef: Hashable {
     public let key: String
@@ -87,7 +108,8 @@ public enum RecordType: String, Codable, CaseIterable, Identifiable, Hashable {
         switch self {
         case .login:
             return [FieldDef("username", "Username"),
-                    FieldDef("password", "Password", .concealed)]
+                    FieldDef("password", "Password", .concealed),
+                    FieldDef("secondSecret", "Second password", .concealed, placeholder: "Memorable word or second password")]
         case .secureNote:
             return []
         case .paymentCard:
@@ -213,6 +235,9 @@ public struct Entry: Codable, Identifiable, Hashable {
     /// The one group this item belongs to (EntryGroup.id). Nil means no group.
     /// Optional, so records saved before groups existed still decode.
     public var groupID: UUID?
+    /// Logins only: which store is the master (decision 0007). Nil means not decided.
+    /// Optional, so records saved before this existed still decode.
+    public var master: LoginMaster?
 
     public init(id: UUID = UUID(), type: RecordType, title: String = "") {
         self.id = id
@@ -231,6 +256,7 @@ public struct Entry: Codable, Identifiable, Hashable {
         self.deletedAt = nil
         self.icon = nil
         self.groupID = nil
+        self.master = nil
     }
 
     public subscript(field key: String) -> String {

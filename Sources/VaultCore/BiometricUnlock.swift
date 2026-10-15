@@ -62,11 +62,18 @@ public enum BiometricUnlock {
         guard status == errSecSuccess else { throw error(for: status) }
     }
 
-    /// Shows the system Touch ID prompt. Blocks until it is answered: call off the main thread.
-    static func load(header: VaultHeader, reason: String) throws -> SymmetricKey {
-        let context = LAContext()
-        context.localizedReason = reason
-        context.localizedCancelTitle = "Use Vault Password"
+    /// Reads the vault key. With no `context`, shows the system Touch ID panel and blocks until it is
+    /// answered: call off the main thread. With a context already evaluated for biometrics (the inline
+    /// sensor on the Mac lock screen), the Keychain reuses that match and shows nothing.
+    static func load(header: VaultHeader, reason: String, context evaluated: LAContext? = nil) throws -> SymmetricKey {
+        let context = evaluated ?? LAContext()
+        if evaluated == nil {
+            context.localizedReason = reason
+            context.localizedCancelTitle = "Use Vault Password"
+        } else {
+            // Inline sensor: the finger has already matched. Never let the Keychain raise its own panel.
+            context.interactionNotAllowed = true
+        }
         var query = baseQuery(header)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -90,6 +97,8 @@ public enum BiometricUnlock {
             return .biometricCancelled
         case errSecItemNotFound:
             return .biometricUnavailable("Touch ID is not set up for this vault, or your fingerprints changed. Unlock with your vault password and it will be set up again.")
+        case errSecInteractionNotAllowed:
+            return .biometricUnavailable("Touch ID matched, but the Keychain wanted to ask again. Unlock with your vault password, and tell Claude this message appeared.")
         case errSecAuthFailed:
             return .biometricUnavailable("Touch ID did not unlock the vault. Use your vault password.")
         case errSecMissingEntitlement:

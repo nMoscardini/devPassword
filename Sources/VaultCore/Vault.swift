@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import CryptoKit
 
 public struct LoadResult {
@@ -166,8 +167,9 @@ public final class Vault: @unchecked Sendable {
     }
 
     /// Shows the Touch ID prompt and unlocks. Blocks while the prompt is up: call off the main thread.
-    public func unlockWithBiometrics(reason: String) throws {
-        let candidate = try BiometricUnlock.load(header: header, reason: reason)
+    /// `context`: an LAContext already evaluated for biometrics (inline sensor). Nil shows the system panel.
+    public func unlockWithBiometrics(reason: String, context: LAContext? = nil) throws {
+        let candidate = try BiometricUnlock.load(header: header, reason: reason, context: context)
         // Prove the stored key really opens this vault before trusting it.
         if let first = try allSealed().first, (try? Vault.decryptEntry(first, key: candidate, header: header)) == nil {
             BiometricUnlock.remove(header: header)
