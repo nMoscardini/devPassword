@@ -108,15 +108,18 @@ public enum AppleImport {
 
     // MARK: Matching
 
-    /// "https://www.Example.com/login" -> "example.com". Falls back to the trimmed text.
+    /// "https://www.Example.com/login" -> "example.com". Empty when there is no site, including
+    /// LastPass's placeholder "http://" on entries with no website (15 October: Passwords
+    /// rejected 63 such rows as "Missing required information").
     public static func host(_ url: String) -> String {
-        let s = url.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !s.isEmpty else { return "" }
-        let withScheme = s.contains("://") ? s : "https://" + s
-        if var h = URLComponents(string: withScheme)?.host, !h.isEmpty {
-            if h.hasPrefix("www.") { h.removeFirst(4) }
-            return h
-        }
+        var s = url.trimmingCharacters(in: .whitespaces).lowercased()
+        if let r = s.range(of: "://") { s = String(s[r.upperBound...]) }
+        s = String(s.prefix { $0 != "/" && $0 != "?" && $0 != "#" })
+        if let at = s.lastIndex(of: "@") { s = String(s[s.index(after: at)...]) }
+        if let colon = s.firstIndex(of: ":") { s = String(s[..<colon]) }
+        s = s.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("www.") { s.removeFirst(4) }
+        guard !s.isEmpty, !s.contains(" ") else { return "" }
         return s
     }
 

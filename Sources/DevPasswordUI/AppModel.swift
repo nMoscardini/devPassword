@@ -49,6 +49,13 @@ final class AppModel: ObservableObject {
     @Published var showGenerator = false
     @Published var showImport = false
     @Published var showAppleImport = false
+    @Published var showLastPass = false
+    /// The plaintext file made for Apple Passwords during the LastPass move. Deleted when the
+    /// window closes; this survives a crash so the next unlock can delete it.
+    var pendingAppleFile: URL? {
+        get { UserDefaults.standard.string(forKey: "pendingAppleFile").map { URL(fileURLWithPath: $0) } }
+        set { UserDefaults.standard.set(newValue?.path, forKey: "pendingAppleFile") }
+    }
     /// Hides Apple-imported logins from every list except the Apple Passwords row and Favourites. Per Mac.
     @Published var hideAppleLogins = UserDefaults.standard.bool(forKey: "hideAppleLogins") {
         didSet { UserDefaults.standard.set(hideAppleLogins, forKey: "hideAppleLogins") }
@@ -308,6 +315,7 @@ final class AppModel: ObservableObject {
     }
 
     private func didUnlock() {
+        removeLeftoverAppleFile()
         stopTouchIDSensor()
         sensorMessage = nil
         lockNotice = nil
@@ -338,6 +346,7 @@ final class AppModel: ObservableObject {
         showGenerator = false
         showImport = false
         showAppleImport = false
+        showLastPass = false
         showRestore = false
         Clipboard.clearIfOurs()
         sensorLockedOut = false
@@ -454,6 +463,34 @@ final class AppModel: ObservableObject {
             errorMessage = error.localizedDescription
             return nil
         }
+    }
+
+    /// Saves the LastPass notes and website-less logins. Returns how many, or nil on failure.
+    func saveLastPassRecords(_ plan: LastPassPlan) -> Int? {
+        guard let vault else { return nil }
+        do {
+            let n = try LastPassMigration.saveRecords(plan, to: vault)
+            reload()
+            return n
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// A file for Apple left behind by a crash or force quit: delete it now.
+    private func removeLeftoverAppleFile() {
+        guard let f = pendingAppleFile else { return }
+        if FileManager.default.fileExists(atPath: f.path) {
+            do {
+                try AppleImport.destroyExport(at: f)
+                infoMessage = "A file made for Apple Passwords was left in Downloads. It has been deleted."
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
+        pendingAppleFile = nil
     }
 
     // MARK: Groups

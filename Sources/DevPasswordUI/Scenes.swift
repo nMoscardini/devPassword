@@ -35,6 +35,8 @@ public struct DevPasswordScenes: Scene {
                 Divider()
                 Button("Import from Apple Passwords…") { model.showAppleImport = true }
                     .disabled(!model.isUnlocked)
+                Button("Move from LastPass…") { model.showLastPass = true }
+                    .disabled(!model.isUnlocked)
                 Toggle("Hide Apple Logins", isOn: $model.hideAppleLogins)
                     .keyboardShortcut("a", modifiers: [.command, .shift])
                     .disabled(!model.isUnlocked)

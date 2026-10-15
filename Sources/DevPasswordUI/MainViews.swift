@@ -59,6 +59,7 @@ struct MainView: View {
         .sheet(isPresented: $model.showGenerator) { GeneratorView(onUse: nil) }
         .sheet(isPresented: $model.showImport) { ImportView() }
         .sheet(isPresented: $model.showAppleImport) { AppleImportView() }
+        .sheet(isPresented: $model.showLastPass) { LastPassView() }
         .sheet(isPresented: $model.showRestore) { RestoreView() }
         .safeAreaInset(edge: .top) {
             if model.appleSnapshotStale, let age = model.appleSnapshotAge {

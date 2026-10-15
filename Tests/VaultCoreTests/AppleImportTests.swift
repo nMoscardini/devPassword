@@ -30,6 +30,10 @@ final class AppleImportTests: XCTestCase {
     func testHostMatching() {
         XCTAssertEqual(AppleImport.host("https://www.Example.com/login?x=1"), "example.com")
         XCTAssertEqual(AppleImport.host("example.com"), "example.com")
+        XCTAssertEqual(AppleImport.host("https://user@www.example.com:8443/x"), "example.com")
+        XCTAssertEqual(AppleImport.host("http://"), "", "LastPass placeholder for no website")
+        XCTAssertEqual(AppleImport.host("https://"), "")
+        XCTAssertEqual(AppleImport.host("  "), "")
         XCTAssertEqual(AppleImport.place(url: "https://example.com/", username: "Me@Test.com"),
                        AppleImport.place(url: "http://www.example.com/a", username: "me@test.com"))
     }
