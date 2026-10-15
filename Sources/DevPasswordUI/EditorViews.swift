@@ -19,18 +19,32 @@ struct EntryEditorView: View {
 
     private var isNew: Bool { !model.entries.contains { $0.id == original.id } }
 
+    /// Apple-imported login: Apple's fields are shown but cannot be changed (decision 0007).
+    private var fromApple: Bool { original.isAppleSnapshot }
+    private static let appleFields: Set<String> = ["username", "password", "otpAuth"]
+
     var body: some View {
         VStack(spacing: 0) {
             Form {
                 Section {
                     TextField("Title", text: $draft.title)
                 }
+                if fromApple {
+                    Section {
+                        Label("From Apple Passwords. Website, username, password, one-time code and Apple's notes are read-only here: change them in Passwords. The title, your notes, second password, custom fields, tags, group and icon are yours.",
+                              systemImage: "apple.logo")
+                            .font(.callout)
+                    }
+                }
                 if draft.type == .login {
                     Section("Websites, one per line") {
                         TextEditor(text: $urlsText)
                             .font(.body)
                             .frame(minHeight: 44)
+                            .disabled(fromApple)
                     }
+                }
+                if draft.type == .login && !fromApple {
                     Section("Master (decision 0007)") {
                         Picker("Master", selection: $draft.master) {
                             Text("Not set").tag(LoginMaster?.none)
@@ -46,10 +60,12 @@ struct EntryEditorView: View {
                 if !draft.type.fieldDefs.isEmpty {
                     Section(draft.type.displayName) {
                         ForEach(draft.type.fieldDefs, id: \.key) { def in
+                            let locked = fromApple && Self.appleFields.contains(def.key)
                             FieldEditor(label: def.label, placeholder: def.placeholder,
                                         concealed: def.kind == .concealed,
                                         value: binding(def.key),
-                                        onGenerate: def.key == draft.type.passwordKey ? { showGenerator = true } : nil)
+                                        onGenerate: def.key == draft.type.passwordKey && !locked ? { showGenerator = true } : nil)
+                                .disabled(locked)
                         }
                     }
                 }
@@ -77,10 +93,19 @@ struct EntryEditorView: View {
                         draft.customFields.append(CustomField(label: "", value: ""))
                     }
                 }
-                Section("Notes") {
+                if fromApple {
+                    Section("Your notes (kept in devPassword, never overwritten by an import)") {
+                        TextEditor(text: Binding(get: { draft.myNotes ?? "" },
+                                                 set: { draft.myNotes = $0.isEmpty ? nil : $0 }))
+                            .font(.body)
+                            .frame(minHeight: 80)
+                    }
+                }
+                Section(fromApple ? "Notes from Apple Passwords (read-only, change them in Passwords)" : "Notes") {
                     TextEditor(text: $draft.notes)
                         .font(.body)
-                        .frame(minHeight: 80)
+                        .frame(minHeight: fromApple ? 44 : 80)
+                        .disabled(fromApple)
                     if draft.type == .secureNote {
                         Toggle("Conceal note text until revealed", isOn: $draft.notesConcealed)
                     }

@@ -46,6 +46,7 @@ final class AppModel: ObservableObject {
     @Published var editing: Entry?
     @Published var showGenerator = false
     @Published var showImport = false
+    @Published var showAppleImport = false
     @Published var showRestore = false
     @Published var sortOrder: ListSortOrder = ListSortOrder(rawValue: UserDefaults.standard.string(forKey: "sortOrder") ?? "") ?? .name {
         didSet { UserDefaults.standard.set(sortOrder.rawValue, forKey: "sortOrder") }
@@ -329,6 +330,7 @@ final class AppModel: ObservableObject {
         search = ""
         showGenerator = false
         showImport = false
+        showAppleImport = false
         showRestore = false
         Clipboard.clearIfOurs()
         sensorLockedOut = false
@@ -395,6 +397,11 @@ final class AppModel: ObservableObject {
 
     func save(_ entry: Entry, touchModified: Bool = true) {
         guard let vault else { return }
+        // Apple-imported logins: Apple's fields cannot be changed here (decision 0007).
+        var entry = entry
+        if let original = entries.first(where: { $0.id == entry.id }) {
+            entry = AppleImport.keepAppleFields(entry, from: original)
+        }
         do {
             try vault.save(entry, touchModified: touchModified)
             reload()
@@ -408,6 +415,33 @@ final class AppModel: ObservableObject {
         var e = entry
         e.favourite.toggle()
         save(e)
+    }
+
+    // MARK: Apple Passwords snapshot (decision 0007)
+
+    /// Days before devPassword asks for a fresh Apple import. Per Mac.
+    var appleRefreshDays: Int {
+        get { let v = UserDefaults.standard.integer(forKey: "appleRefreshDays"); return v == 0 ? 30 : v }
+        set { UserDefaults.standard.set(newValue, forKey: "appleRefreshDays"); objectWillChange.send() }
+    }
+
+    /// Whole days since the last Apple import. Nil if there has never been one.
+    var appleSnapshotAge: Int? { AppleImport.ageInDays(entries) }
+
+    var appleSnapshotStale: Bool { (appleSnapshotAge ?? 0) > appleRefreshDays }
+
+    /// Writes an import plan. Returns the records written, or nil on failure.
+    func applyAppleImport(_ plan: AppleImportPlan) -> Int? {
+        guard let vault else { return nil }
+        do {
+            let n = try AppleImport.apply(plan, to: vault)
+            reload()
+            touch()
+            return n
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
     }
 
     // MARK: Groups

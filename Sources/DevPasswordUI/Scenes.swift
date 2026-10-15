@@ -33,6 +33,8 @@ public struct DevPasswordScenes: Scene {
                     .keyboardShortcut("g", modifiers: [.command, .shift])
                     .disabled(!model.isUnlocked)
                 Divider()
+                Button("Import from Apple Passwords…") { model.showAppleImport = true }
+                    .disabled(!model.isUnlocked)
                 Button("Import CSV…") { model.showImport = true }
                     .disabled(!model.isUnlocked)
                 Button("Back Up Now") { model.backupNow() }

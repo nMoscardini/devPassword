@@ -49,7 +49,20 @@ struct MainView: View {
         .sheet(item: $model.editing) { e in EntryEditorView(entry: e) }
         .sheet(isPresented: $model.showGenerator) { GeneratorView(onUse: nil) }
         .sheet(isPresented: $model.showImport) { ImportView() }
+        .sheet(isPresented: $model.showAppleImport) { AppleImportView() }
         .sheet(isPresented: $model.showRestore) { RestoreView() }
+        .safeAreaInset(edge: .top) {
+            if model.appleSnapshotStale, let age = model.appleSnapshotAge {
+                HStack {
+                    Label("Apple Passwords snapshot is \(age) days old. Logins here may be out of date.", systemImage: "clock.arrow.circlepath")
+                    Spacer()
+                    Button("Refresh…") { model.showAppleImport = true }
+                }
+                .font(.callout)
+                .padding(8)
+                .background(Color.orange.opacity(0.2))
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             if model.integrityFailures > 0 {
                 Text("\(model.integrityFailures) record(s) failed their integrity check and are hidden. They are unchanged on disk. Restore from a backup if this persists.")
@@ -137,6 +150,11 @@ struct EntryListView: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                if e.isAppleSnapshot {
+                    Image(systemName: e.appleRemovedAt == nil ? "apple.logo" : "minus.circle")
+                        .foregroundStyle(.secondary)
+                        .help(e.appleRemovedAt == nil ? "From Apple Passwords, read-only" : "No longer in Apple Passwords")
+                }
                 if e.tags.contains(Importer.reviewTag) {
                     Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).help("Imported conflict. Review it.")
                 }
@@ -197,7 +215,20 @@ struct EntryDetailView: View {
                           systemImage: "calendar")
                         .foregroundStyle(entry.expires(within: AppModel.expiringDays) ? Color.orange : Color.secondary)
                 }
-                if entry.type == .login {
+                if entry.isAppleSnapshot {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("From Apple Passwords. Read-only: change it in Passwords, then import again.", systemImage: "apple.logo")
+                        if let seen = entry.appleSeenAt {
+                            Text("Snapshot \(seen.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                        if let gone = entry.appleRemovedAt {
+                            Label("No longer in Apple Passwords since \(gone.formatted(date: .abbreviated, time: .omitted)). This is the last known copy.",
+                                  systemImage: "minus.circle")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                } else if entry.type == .login {
                     Label(entry.master.map { "Master: " + $0.displayName } ?? "Master not set",
                           systemImage: entry.master == .apple ? "apple.logo" : "lock.shield")
                         .foregroundStyle(.secondary)
@@ -240,10 +271,16 @@ struct EntryDetailView: View {
                     }
                 }
 
+                if let mine = entry.myNotes, !mine.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Your notes").foregroundStyle(.secondary)
+                        Text(mine).textSelection(.enabled)
+                    }
+                }
                 if !entry.notes.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text("Notes").foregroundStyle(.secondary)
+                            Text(entry.isAppleSnapshot ? "Notes from Apple Passwords" : "Notes").foregroundStyle(.secondary)
                             if entry.notesConcealed {
                                 Button { toggle("notes") } label: {
                                     Image(systemName: revealed.contains("notes") ? "eye.slash" : "eye")
@@ -260,6 +297,15 @@ struct EntryDetailView: View {
                 }
                 if !entry.tags.isEmpty {
                     Text(entry.tags.map { "#" + $0 }.joined(separator: "  ")).foregroundStyle(.secondary)
+                }
+                if let history = entry.appleHistory, !history.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("History").foregroundStyle(.secondary)
+                        ForEach(Array(history.reversed().enumerated()), id: \.offset) { pair in
+                            Text("\(pair.element.at.formatted(date: .abbreviated, time: .omitted))  \(pair.element.text)")
+                                .font(.callout)
+                        }
+                    }
                 }
                 Text("Created \(entry.created.formatted(date: .abbreviated, time: .shortened))  ·  Modified \(entry.modified.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption).foregroundStyle(.tertiary)

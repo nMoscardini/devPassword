@@ -14,3 +14,6 @@ logs/
 *.csv
 ~$*
 .DS_Store
+
+# Deployed app copies (scripts/deploy.sh)
+dist/

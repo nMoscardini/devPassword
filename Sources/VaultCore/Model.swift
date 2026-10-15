@@ -109,7 +109,8 @@ public enum RecordType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .login:
             return [FieldDef("username", "Username"),
                     FieldDef("password", "Password", .concealed),
-                    FieldDef("secondSecret", "Second password", .concealed, placeholder: "Memorable word or second password")]
+                    FieldDef("secondSecret", "Second password", .concealed, placeholder: "Memorable word or second password"),
+                    FieldDef("otpAuth", "One-time code setup", .concealed, placeholder: "otpauth:// link")]
         case .secureNote:
             return []
         case .paymentCard:
@@ -238,6 +239,18 @@ public struct Entry: Codable, Identifiable, Hashable {
     /// Logins only: which store is the master (decision 0007). Nil means not decided.
     /// Optional, so records saved before this existed still decode.
     public var master: LoginMaster?
+    /// Apple Passwords snapshot (decision 0007). Set on logins imported from Apple: the date of
+    /// the last import that contained this login. Nil for every other record.
+    public var appleSeenAt: Date?
+    /// Set when a later Apple import no longer contained this login. The record is kept.
+    public var appleRemovedAt: Date?
+    /// Matching key from the import: website host, username and occurrence. Stays fixed if the title changes.
+    public var appleKey: String?
+    /// Dated history of this login in Apple Passwords. No secrets in it.
+    public var appleHistory: [AppleLoginEvent]?
+    /// Nino's own notes on an Apple-imported login. Apple's notes stay in `notes` and are
+    /// replaced on each import; these are devPassword's and are never touched by an import.
+    public var myNotes: String?
 
     public init(id: UUID = UUID(), type: RecordType, title: String = "") {
         self.id = id
@@ -265,6 +278,9 @@ public struct Entry: Codable, Identifiable, Hashable {
     }
 
     public var isDeleted: Bool { deletedAt != nil }
+
+    /// A login imported from Apple Passwords. Its Apple fields are read-only in devPassword.
+    public var isAppleSnapshot: Bool { appleSeenAt != nil }
 
     /// The icon to show: the user's choice, else the type's.
     public var symbol: String { icon ?? type.symbol }
@@ -309,6 +325,7 @@ public struct Entry: Codable, Identifiable, Hashable {
             parts.append(f.value)
         }
         if !notesConcealed { parts.append(notes) }
+        parts.append(myNotes ?? "")
         parts += tags
         return parts.filter { !$0.isEmpty }.joined(separator: "\n")
     }
