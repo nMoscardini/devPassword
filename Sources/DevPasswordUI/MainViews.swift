@@ -74,6 +74,18 @@ struct MainView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
+            if let p = model.logoProgress {
+                HStack {
+                    ProgressView(value: Double(p.done), total: Double(max(p.total, 1))).frame(width: 160)
+                    Text("Fetching site logos: \(p.done) of \(p.total)").font(.callout)
+                    Spacer()
+                    Button("Stop") { model.cancelLogoFetch() }
+                }
+                .padding(8)
+                .background(.bar)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
             if model.integrityFailures > 0 {
                 Text("\(model.integrityFailures) record(s) failed their integrity check and are hidden. They are unchanged on disk. Restore from a backup if this persists.")
                     .font(.callout)
@@ -102,7 +114,11 @@ struct SidebarView: View {
                 Section("Groups") { rows(groupRows) }
             }
             Section("Types") { rows(Self.types) }
-            Section { rows((model.hasAppleLogins ? [Optional(SidebarFilter.apple)] : []) + Self.bottom) }
+            Section {
+                rows((model.hasAppleLogins ? [Optional(SidebarFilter.apple)] : [])
+                     + (model.hasRemovedAppleLogins ? [Optional(SidebarFilter.appleRemoved)] : [])
+                     + Self.bottom)
+            }
         }
         .paneBackground(.sidebar)
     }
@@ -124,6 +140,7 @@ struct SidebarView: View {
         case .expiring: return "Expiring Soon"
         case .deleted: return "Deleted"
         case .apple: return "Apple Passwords"
+        case .appleRemoved: return "Removed from Apple"
         case .type(let t): return t.pluralName
         case .group(let id): return model.groups.first { $0.id == id }?.name ?? "Group"
         }
@@ -136,6 +153,7 @@ struct SidebarView: View {
         case .expiring: return "calendar.badge.exclamationmark"
         case .deleted: return "trash"
         case .apple: return "apple.logo"
+        case .appleRemoved: return "minus.circle"
         case .type(let t): return t.symbol
         case .group(let id): return model.groups.first { $0.id == id }?.icon ?? EntryGroup.defaultIcon
         }
@@ -144,16 +162,15 @@ struct SidebarView: View {
 
 struct EntryListView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let items = model.visibleEntries
         List(items, selection: $model.selection) { e in
             HStack(spacing: 10) {
-                ItemIcon(e.symbol)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22)
+                SiteIcon(entry: e, size: 24)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(e.title).lineLimit(1)
+                    Text(e.displayTitle).lineLimit(1)
                     Text(model.filter == .expiring ? expiryText(e)
                          : (model.sortOrder == .name ? e.subtitle
                             : "Changed " + e.modified.formatted(date: .abbreviated, time: .omitted)))
@@ -188,6 +205,12 @@ struct EntryListView: View {
             }
             .padding(.vertical, 2)
         }
+        .contextMenu(forSelectionType: UUID.self) { _ in
+            EmptyView()
+        } primaryAction: { ids in
+            // Double-click or Return: open in its own window.
+            for id in ids { openWindow(id: "item", value: id) }
+        }
         .paneBackground(.list)
         .overlay {
             if items.isEmpty {
@@ -208,15 +231,21 @@ struct EntryDetailView: View {
     let entry: Entry
     @State private var revealed: Set<String> = []
     @State private var confirmPurge = false
+    @State private var showLogo = false
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 14) {
-                    ItemIcon(entry.symbol, size: 30).foregroundStyle(.secondary)
+                    Button { showLogo = true } label: { SiteIcon(entry: entry, size: 40) }
+                        .buttonStyle(.plain)
+                        .help("Choose the website this record's logo comes from")
+                        .popover(isPresented: $showLogo, arrowEdge: .bottom) {
+                            LogoSiteView(entry: entry).environmentObject(model)
+                        }
                     VStack(alignment: .leading) {
-                        Text(entry.title).font(.title2.bold()).textSelection(.enabled)
+                        Text(entry.displayTitle).font(.title2.bold()).textSelection(.enabled)
                         Text(entry.type.displayName + (model.group(for: entry).map { "  ·  " + $0.name } ?? ""))
                             .foregroundStyle(.secondary)
                     }
@@ -226,6 +255,12 @@ struct EntryDetailView: View {
                     Label(entry.expiryText(exp) + " " + exp.formatted(date: .long, time: .omitted),
                           systemImage: "calendar")
                         .foregroundStyle(entry.expires(within: AppModel.expiringDays) ? Color.orange : Color.secondary)
+                }
+                HStack(spacing: 8) {
+                    Text(model.logoHost(for: entry).map { "Logo from \($0)" } ?? "No logo website")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Change…") { showLogo = true }
+                        .buttonStyle(.link).font(.caption)
                 }
                 if entry.isAppleSnapshot {
                     VStack(alignment: .leading, spacing: 4) {
@@ -436,5 +471,65 @@ struct FieldRow: View {
             .help("Copy. Clears after 30 seconds.")
         }
         .buttonStyle(.borderless)
+    }
+}
+
+/// Click a record's icon: choose the website its logo comes from, fetch it now, see the result.
+struct LogoSiteView: View {
+    @EnvironmentObject var model: AppModel
+    let entry: Entry
+    @State private var site = ""
+    @State private var status = ""
+    @State private var busy = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Icon for \(entry.displayTitle)").font(.headline)
+            Text("Logo from a website").font(.subheadline).foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                SiteIcon(entry: current, size: 32)
+                TextField("Website", text: $site, prompt: Text("For example ba.com"))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 220)
+                    .onSubmit(get)
+            }
+            HStack {
+                Button("Get Logo", action: get)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(busy || site.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Use Default") { run(nil) }
+                    .disabled(busy || current.logoSite == nil)
+                if busy { ProgressView().controlSize(.small) }
+            }
+            if !status.isEmpty {
+                Text(status).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Only that site's icon file is fetched. Your passwords never leave the Mac.")
+                .font(.caption).foregroundStyle(.tertiary)
+            Divider()
+            Text("Or a symbol").font(.subheadline).foregroundStyle(.secondary)
+            IconPicker(selection: Binding(get: { current.icon },
+                                          set: { model.setIcon(current, to: $0); status = "" }),
+                       typeSymbol: current.type.symbol,
+                       resetTitle: "Automatic")
+        }
+        .padding(16)
+        .frame(width: 380)
+        .onAppear { site = current.logoSite ?? model.logoHost(for: current) ?? "" }
+    }
+
+    /// The record as it is now, after any save.
+    private var current: Entry { model.entries.first { $0.id == entry.id } ?? entry }
+
+    private func get() { run(site) }
+
+    private func run(_ value: String?) {
+        busy = true
+        status = ""
+        Task {
+            status = await model.setLogoSite(current, to: value)
+            if value == nil { site = model.logoHost(for: current) ?? "" }
+            busy = false
+        }
     }
 }

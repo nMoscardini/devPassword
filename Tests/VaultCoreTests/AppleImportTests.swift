@@ -170,6 +170,18 @@ final class AppleImportTests: XCTestCase {
         XCTAssertFalse(AppleImport.isSyncedFolder(URL(fileURLWithPath: "/Users/x/Downloads/p.csv")))
     }
 
+    func testDisplayTitleDropsAddressPrefixes() {
+        func apple(_ t: String) -> Entry { var e = Entry(type: .login, title: t); e.appleSeenAt = Date(); return e }
+        XCTAssertEqual(apple("account.bbc.com").displayTitle, "bbc.com")
+        XCTAssertEqual(apple("www.amazon.co.uk").displayTitle, "amazon.co.uk")
+        XCTAssertEqual(apple("login.nhs.uk").displayTitle, "nhs.uk")
+        XCTAssertEqual(apple("www.com").displayTitle, "www.com", "never strips down to a bare suffix")
+        XCTAssertEqual(apple("192.168.1.1").displayTitle, "192.168.1.1")
+        XCTAssertEqual(apple("My bank").displayTitle, "My bank")
+        XCTAssertEqual(Entry(type: .login, title: "www.example.com").displayTitle, "www.example.com",
+                       "titles Nino typed are left alone")
+    }
+
     func testOldRecordsStillDecode() throws {
         var e = Entry(type: .login, title: "t")
         e[field: "username"] = "u"

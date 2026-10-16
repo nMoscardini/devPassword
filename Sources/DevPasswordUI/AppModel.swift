@@ -13,8 +13,10 @@ enum Screen: Equatable {
 
 enum SidebarFilter: Hashable {
     case all, favourites, expiring, deleted
-    /// Logins imported from Apple Passwords (decision 0007).
+    /// Logins imported from Apple Passwords (decision 0007) that Apple still has.
     case apple
+    /// Apple-imported logins that a later import no longer contained. Kept as the last known copy.
+    case appleRemoved
     case type(RecordType)
     case group(UUID)
 }
@@ -50,6 +52,38 @@ final class AppModel: ObservableObject {
     @Published var showImport = false
     @Published var showAppleImport = false
     @Published var showLastPass = false
+    /// Site logos by host (decision 0009). Loaded at unlock from the sealed cache, dropped on lock.
+    @Published var logos: [String: NSImage] = [:] { didSet { rebuildLogoLabels() } }
+    /// "Fetching logos 12 of 340" while a fetch runs.
+    @Published var logoProgress: (done: Int, total: Int)?
+    private var logoCache = LogoCache()
+    /// Site label -> host for every website in the vault, rebuilt on reload. Lets "BBC Sport" find bbc.co.uk.
+    private var logoLabelIndex: [String: String] = [:]
+
+    /// The site whose logo a record shows, if any (SiteLogos.logoHost).
+    func logoHost(for e: Entry) -> String? { SiteLogos.logoHost(for: e, index: logoLabelIndex) }
+
+    /// The logo for a site, or failing that any logo from the same company (same main name), so
+    /// account.bbc.com and bbc.co.uk show the same BBC logo.
+    func logo(for host: String) -> NSImage? {
+        if let img = logos[host] { return img }
+        let l = SiteLogos.label(ofHost: host)
+        guard l.count >= 3, !SiteLogos.vagueWords.contains(l) else { return nil }
+        return logosByLabel[l]
+    }
+
+    /// Main name -> a logo, rebuilt whenever logos change.
+    private var logosByLabel: [String: NSImage] = [:]
+
+    private func rebuildLogoLabels() {
+        var out: [String: NSImage] = [:]
+        for host in logos.keys.sorted(by: { $0.count < $1.count }) {   // shortest host wins: the main site
+            let l = SiteLogos.label(ofHost: host)
+            if l.count >= 3, !SiteLogos.vagueWords.contains(l), out[l] == nil { out[l] = logos[host] }
+        }
+        logosByLabel = out
+    }
+    private var logoTask: Task<Void, Never>?
     /// The plaintext file made for Apple Passwords during the LastPass move. Deleted when the
     /// window closes; this survives a crash so the next unlock can delete it.
     var pendingAppleFile: URL? {
@@ -61,6 +95,7 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(hideAppleLogins, forKey: "hideAppleLogins") }
     }
     var hasAppleLogins: Bool { entries.contains { $0.isAppleSnapshot && !$0.isDeleted } }
+    var hasRemovedAppleLogins: Bool { entries.contains { $0.isAppleSnapshot && !$0.isDeleted && $0.appleRemovedAt != nil } }
     @Published var showRestore = false
     @Published var sortOrder: ListSortOrder = ListSortOrder(rawValue: UserDefaults.standard.string(forKey: "sortOrder") ?? "") ?? .name {
         didSet { UserDefaults.standard.set(sortOrder.rawValue, forKey: "sortOrder") }
@@ -315,6 +350,7 @@ final class AppModel: ObservableObject {
     }
 
     private func didUnlock() {
+        loadLogos()
         removeLeftoverAppleFile()
         stopTouchIDSensor()
         sensorMessage = nil
@@ -349,6 +385,11 @@ final class AppModel: ObservableObject {
         showLastPass = false
         showRestore = false
         Clipboard.clearIfOurs()
+        logoTask?.cancel()
+        logoTask = nil
+        logoProgress = nil
+        logos = [:]
+        logoCache = LogoCache()
         sensorLockedOut = false
         sensorMessage = nil
         sensorID = UUID()
@@ -361,6 +402,7 @@ final class AppModel: ObservableObject {
         guard let vault, vault.isUnlocked else { return }
         do {
             let r = try vault.loadAll()
+            logoLabelIndex = SiteLogos.labelIndex(r.entries)
             entries = r.entries
             integrityFailures = r.failedIDs.count
         } catch {
@@ -390,11 +432,12 @@ final class AppModel: ObservableObject {
             case .deleted: return e.isDeleted
             case .type(let t): return !e.isDeleted && e.type == t
             case .group(let id): return !e.isDeleted && e.groupID == id
-            case .apple: return !e.isDeleted && e.isAppleSnapshot
+            case .apple: return !e.isDeleted && e.isAppleSnapshot && e.appleRemovedAt == nil
+            case .appleRemoved: return !e.isDeleted && e.isAppleSnapshot && e.appleRemovedAt != nil
             }
         }
         // Favourites were chosen by hand, so they stay visible.
-        if hideAppleLogins && f != .apple && f != .favourites {
+        if hideAppleLogins && f != .apple && f != .appleRemoved && f != .favourites {
             list = list.filter { !$0.isAppleSnapshot }
         }
         let q = search.trimmingCharacters(in: .whitespaces)
@@ -405,7 +448,7 @@ final class AppModel: ObservableObject {
             return list.sorted { ($0.expiryDate ?? .distantFuture) < ($1.expiryDate ?? .distantFuture) }
         }
         switch sortOrder {
-        case .name: return list.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .name: return list.sorted { $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending }
         case .newest: return list.sorted { $0.modified > $1.modified }
         case .oldest: return list.sorted { $0.modified < $1.modified }
         }
@@ -491,6 +534,131 @@ final class AppModel: ObservableObject {
             }
         }
         pendingAppleFile = nil
+    }
+
+    // MARK: Site logos (decision 0009)
+
+    private func loadLogos() {
+        guard let vault else { return }
+        logoCache = vault.loadLogos()
+        var images: [String: NSImage] = [:]
+        for (host, png) in logoCache.logos { if let img = NSImage(data: png) { images[host] = img } }
+        logos = images
+    }
+
+    /// Hosts with no logo yet, not counting sites asked recently that had none.
+    var logosToFetch: Int { logoCache.toFetch(SiteLogos.hosts(for: entries)).count }
+
+    /// Asks each site for its icon. Only when Nino asks. Stops if the vault locks.
+    func fetchLogos() {
+        guard isUnlocked, logoTask == nil else { return }
+        let hosts = logoCache.toFetch(SiteLogos.hosts(for: entries))
+        guard !hosts.isEmpty else {
+            infoMessage = "Every site already has a logo, or was asked in the last 30 days and had none."
+            return
+        }
+        logoProgress = (0, hosts.count)
+        vault?.audit("logos.fetch_started")
+        logoTask = Task { [weak self] in
+            var done = 0
+            var found = 0
+            await withTaskGroup(of: (String, Data?).self) { group in
+                var index = min(6, hosts.count)   // six at a time
+                for h in hosts[0..<index] { group.addTask { (h, await SiteLogos.fetch(host: h)) } }
+                for await (host, png) in group {
+                    guard let self, !Task.isCancelled else { group.cancelAll(); return }
+                    if let png, let img = NSImage(data: png) {
+                        self.logoCache.logos[host] = png
+                        self.logos[host] = img
+                        found += 1
+                    } else {
+                        self.logoCache.misses[host] = Date()
+                    }
+                    done += 1
+                    self.logoProgress = (done, hosts.count)
+                    if index < hosts.count {
+                        let h = hosts[index]
+                        index += 1
+                        group.addTask { (h, await SiteLogos.fetch(host: h)) }
+                    }
+                }
+            }
+            guard let self else { return }
+            self.logoTask = nil
+            self.logoProgress = nil
+            // Stopped by hand: keep what arrived. Locked: the key is gone, nothing is saved.
+            guard self.isUnlocked, let vault = self.vault else { return }
+            do {
+                try vault.saveLogos(self.logoCache)
+                self.infoMessage = Task.isCancelled
+                    ? "Stopped. \(found) logos kept. Fetch again to carry on."
+                    : "Logos: \(found) found, \(done - found) sites had none (they get a letter tile)."
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func cancelLogoFetch() {
+        logoTask?.cancel()
+    }
+
+    /// Vault > Retry Sites With No Logo: forget the misses, then fetch again.
+    func retryLogoMisses() {
+        guard isUnlocked, logoTask == nil else { return }
+        logoCache.forgetMisses()
+        fetchLogos()
+    }
+
+    /// Asks one record's logo site now, even if it failed before. Returns a line to show Nino.
+    @discardableResult
+    func fetchLogo(for entry: Entry) async -> String {
+        guard isUnlocked, let host = logoHost(for: entry) else {
+            return "No website to ask. Type one above, for example ba.com."
+        }
+        vault?.audit("logos.fetch_one")
+        let png = await SiteLogos.fetch(host: host)
+        guard isUnlocked, let vault else { return "" }
+        if let png, let img = NSImage(data: png) {
+            logoCache.logos[host] = png
+            logoCache.misses[host] = nil
+            logos[host] = img
+            try? vault.saveLogos(logoCache)
+            return "Logo from \(host)."
+        }
+        logoCache.misses[host] = Date()
+        try? vault.saveLogos(logoCache)
+        return "\(host) gave no usable logo. Try another address for the same company, such as its main .com site."
+    }
+
+    /// Sets the record's own symbol (nil: back to automatic). A chosen symbol replaces any logo website,
+    /// so what Nino picked is what he sees.
+    func setIcon(_ entry: Entry, to symbol: String?) {
+        var e = entry
+        e.icon = symbol
+        if symbol != nil { e.logoSite = nil }
+        save(e, touchModified: false)
+    }
+
+    /// Sets (or clears, with nil) the website a record takes its logo from, saves it, and fetches.
+    /// The logo site is devPassword's own field, so this works on Apple logins too.
+    func setLogoSite(_ entry: Entry, to site: String?) async -> String {
+        var e = entry
+        let trimmed = site?.trimmingCharacters(in: .whitespaces) ?? ""
+        if trimmed.isEmpty {
+            e.logoSite = nil
+        } else {
+            guard SiteLogos.fetchableHost(trimmed) != nil else {
+                return "\(trimmed) is not a website address devPassword can ask. Use a name like ba.com."
+            }
+            e.logoSite = trimmed
+            e.icon = nil
+        }
+        save(e, touchModified: false)
+        guard let saved = entries.first(where: { $0.id == e.id }) else { return "" }
+        if logoHost(for: saved) == nil { return "Back to the automatic icon." }
+        if let h = logoHost(for: saved), logo(for: h) != nil, trimmed.isEmpty { return "Back to the automatic logo." }
+        return await fetchLogo(for: saved)
     }
 
     // MARK: Groups

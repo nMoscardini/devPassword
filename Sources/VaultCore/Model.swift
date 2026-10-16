@@ -251,6 +251,9 @@ public struct Entry: Codable, Identifiable, Hashable {
     /// Nino's own notes on an Apple-imported login. Apple's notes stay in `notes` and are
     /// replaced on each import; these are devPassword's and are never touched by an import.
     public var myNotes: String?
+    /// Website whose logo this record shows, set by Nino (decision 0009), e.g. "bosch.com".
+    /// devPassword's own field: never touched by an import. Works on any record type.
+    public var logoSite: String?
 
     public init(id: UUID = UUID(), type: RecordType, title: String = "") {
         self.id = id
@@ -278,6 +281,19 @@ public struct Entry: Codable, Identifiable, Hashable {
     }
 
     public var isDeleted: Bool { deletedAt != nil }
+
+    /// The title to show. Apple-imported logins titled with a bare web address lose a leading
+    /// "www.", "account.", "accounts.", "login." or "signin.", so account.bbc.com shows as bbc.com.
+    /// Display only: the stored title is unchanged. Titles Nino typed are shown as they are.
+    public var displayTitle: String {
+        guard isAppleSnapshot, !title.contains(" "), title.contains(".") else { return title }
+        let lower = title.lowercased()
+        for p in ["www.", "accounts.", "account.", "login.", "signin."] where lower.hasPrefix(p) {
+            let rest = String(title.dropFirst(p.count))
+            return rest.contains(".") ? rest : title
+        }
+        return title
+    }
 
     /// A login imported from Apple Passwords. Its Apple fields are read-only in devPassword.
     public var isAppleSnapshot: Bool { appleSeenAt != nil }

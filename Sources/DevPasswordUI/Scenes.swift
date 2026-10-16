@@ -37,6 +37,10 @@ public struct DevPasswordScenes: Scene {
                     .disabled(!model.isUnlocked)
                 Button("Move from LastPass…") { model.showLastPass = true }
                     .disabled(!model.isUnlocked)
+                Button("Fetch Site Logos") { model.fetchLogos() }
+                    .disabled(!model.isUnlocked || model.logoProgress != nil)
+                Button("Retry Sites With No Logo") { model.retryLogoMisses() }
+                    .disabled(!model.isUnlocked || model.logoProgress != nil)
                 Toggle("Hide Apple Logins", isOn: $model.hideAppleLogins)
                     .keyboardShortcut("a", modifiers: [.command, .shift])
                     .disabled(!model.isUnlocked)
@@ -51,6 +55,13 @@ public struct DevPasswordScenes: Scene {
                     .disabled(!model.isUnlocked)
             }
         }
+
+        // Double-click a list row: the item in its own window. Closes when the vault locks.
+        WindowGroup("Item", id: "item", for: UUID.self) { $id in
+            ItemWindow(id: id)
+                .environmentObject(model)
+        }
+        .defaultSize(width: 620, height: 640)
 
         // A normal window rather than SwiftUI's Settings scene, which cannot be resized.
         Window("devPassword Settings", id: "settings") {
@@ -111,5 +122,32 @@ struct RestoreMenuButton: View {
             model.showRestore = true
         }
         .disabled(!model.isUnlocked)
+    }
+}
+
+/// One record in its own window. Shows nothing and closes itself when the vault is locked,
+/// including a window macOS restores at launch.
+struct ItemWindow: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismissWindow) private var dismissWindow
+    let id: UUID?
+
+    var body: some View {
+        Group {
+            if model.isUnlocked, let id, let entry = model.entries.first(where: { $0.id == id }) {
+                EntryDetailView(entry: entry)
+                    .id(entry.id)
+                    .paneBackground(.detail)
+                    .navigationTitle(entry.displayTitle)
+            } else {
+                Color.clear.onAppear(perform: close)
+            }
+        }
+        .frame(minWidth: 480, minHeight: 400)
+        .onChange(of: model.isUnlocked) { _, unlocked in if !unlocked { close() } }
+    }
+
+    private func close() {
+        dismissWindow(id: "item", value: id)
     }
 }

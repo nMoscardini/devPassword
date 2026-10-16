@@ -122,6 +122,11 @@ struct EntryEditorView: View {
                 }
                 Section("Icon") {
                     IconPicker(selection: $draft.icon, typeSymbol: draft.type.symbol)
+                    TextField("Logo from website", text: Binding(get: { draft.logoSite ?? "" },
+                                                                set: { draft.logoSite = $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }),
+                              prompt: Text("For example bosch.com"))
+                    Text("Shows that site's logo instead of the icon. Fetched with Vault > Fetch Site Logos.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)
