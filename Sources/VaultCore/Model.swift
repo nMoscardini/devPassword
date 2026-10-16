@@ -302,6 +302,18 @@ public struct Entry: Codable, Identifiable, Hashable {
         return title
     }
 
+    /// Whether this record goes to the iPhone (Nino, 16 October). Every devPassword record does.
+    /// An Apple-imported login only if it holds something of Nino's that Apple does not have:
+    /// a second password, his own notes, custom fields or a pasted picture. Passwords on the
+    /// iPhone already has the rest.
+    public var belongsOnPhone: Bool {
+        guard isAppleSnapshot else { return true }
+        return !self[field: "secondSecret"].isEmpty
+            || !(myNotes ?? "").isEmpty
+            || !customFields.isEmpty
+            || customLogo != nil
+    }
+
     /// A login imported from Apple Passwords. Its Apple fields are read-only in devPassword.
     public var isAppleSnapshot: Bool { appleSeenAt != nil }
 

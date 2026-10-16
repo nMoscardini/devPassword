@@ -195,6 +195,22 @@ final class AppleImportTests: XCTestCase {
         XCTAssertTrue(try vault.loadAll().entries[0].isArchived)
     }
 
+    func testWhichRecordsGoToThePhone() {
+        XCTAssertTrue(Entry(type: .secureNote, title: "note").belongsOnPhone, "devPassword records always")
+        var apple = Entry(type: .login, title: "a.test")
+        apple.appleSeenAt = Date()
+        XCTAssertFalse(apple.belongsOnPhone, "plain Apple snapshot: Passwords already has it")
+        var bank = apple
+        bank[field: "secondSecret"] = "testmemorable"
+        XCTAssertTrue(bank.belongsOnPhone, "second password is Nino's")
+        var noted = apple; noted.myNotes = "branch sort code on the card"
+        XCTAssertTrue(noted.belongsOnPhone)
+        var custom = apple; custom.customFields = [CustomField(label: "PIN hint", value: "x")]
+        XCTAssertTrue(custom.belongsOnPhone)
+        var pic = apple; pic.customLogo = Data([1])
+        XCTAssertTrue(pic.belongsOnPhone)
+    }
+
     func testOldRecordsStillDecode() throws {
         var e = Entry(type: .login, title: "t")
         e[field: "username"] = "u"

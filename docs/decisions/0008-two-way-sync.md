@@ -8,6 +8,7 @@ Date: 15 October 2026. Status: accepted by Nino, build not started. Record type:
   - Records travel sealed under the vault key, exactly as stored. CloudKit sees ciphertext, record counts and timing only.
   - Conflict: both versions kept, the newer shown, the other marked for Nino to choose. Never a silent overwrite.
   - The Mac takes a snapshot (N3) before applying a batch of incoming changes. Encrypted backups continue unchanged.
+  - Amended 16 October (Nino): only Apple-imported logins that hold something of Nino's go to the iPhone: a second password, his own notes, custom fields or a pasted picture (`Entry.belongsOnPhone`). Plain Apple snapshots stay on the Mac; Passwords on the iPhone already has them. Site logos sync too (they are in backups since 16 October).
   - Apple-imported logins (0007) sync as read-only on both devices. Only the Mac imports from Apple Passwords. Nino's own fields on them (your notes, second password, tags, group) stay editable on both.
   - Groups sync as one sealed list; last change wins, with the previous list kept in the snapshot.
   - Vault key on the iPhone: Keychain, this device only, Face ID current set. First unlock with the vault password.

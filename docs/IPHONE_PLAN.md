@@ -1,5 +1,7 @@
 # devPassword for iPhone - plan (draft, 15 October 2026)
 
+**16 October:** first iPhone version reads the latest encrypted backup, read-only, Face ID; editing waits for sync (Monday). It shows every devPassword record and only those Apple logins that hold something of Nino's (`Entry.belongsOnPhone`). Logos come from the backup; the iPhone never fetches.
+
 **Superseded in part by decision 0008 (two-way sync).** The phone edits and syncs through CloudKit. The read-only and backup-route sections below are now the fallback only. Rewrite this plan at the start of the next session, after the CloudKit proof.
 
 One page. For Nino to approve before any build. Follows decision 0007 and SPEC.md: the iPhone app is a read-only viewer over the latest encrypted backup.

@@ -82,6 +82,7 @@ Not verified: Touch ID after a fingerprint change; full import of Nino's real mS
 
 ## Session log
 
+- 2026-10-16: Nino committed d632938 (smoke 95 passed). Rule for the iPhone (0008 amended): `Entry.belongsOnPhone`: all devPassword records; Apple logins only with a second password, own notes, custom fields or a pasted picture. Test added. Not yet compiled.
 - 2026-10-16: Copy Logo marks the clipboard with its own type (com.nino.devPassword.logo); Paste Picture then uses `normaliseCopied` (redrawn to 128 px, no trimming or padding). Grabs from elsewhere are still trimmed. Test added. Not yet compiled.
 - 2026-10-16: Icon panel > Picture > Copy Logo: copies the logo a record shows (pasted or fetched) to the clipboard as PNG, to paste onto another record. Disabled for letter tiles and symbols. Not yet compiled.
 - 2026-10-16: Logos in backups (0009 amended, Nino): BackupArchive.sealedLogos (optional, older backups still open), digest in the manifest, integrity-checked on open, restored as logos.sealed beside the vault. Test: backup, restore, logos back; tampered logos refused. Fetch Site Logos and Retry moved from the Vault menu to a new Settings > Logos tab with a plain warning and counts. Not yet compiled.
