@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import VaultCore
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case security, backup, groups, export, activity, appearance
+    case security, backup, groups, logos, export, activity, appearance
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .security: return "Security"
         case .backup: return "Backup"
         case .groups: return "Groups"
+        case .logos: return "Logos"
         case .export: return "Export"
         case .activity: return "Activity"
         case .appearance: return "Appearance"
@@ -24,6 +25,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .security: return "lock"
         case .backup: return "externaldrive"
         case .groups: return "folder"
+        case .logos: return "photo.on.rectangle"
         case .export: return "square.and.arrow.up"
         case .activity: return "list.bullet.rectangle"
         case .appearance: return "paintpalette"
@@ -65,6 +67,7 @@ struct SettingsView: View {
                         case .security: SecuritySettings()
                         case .backup: BackupSettings()
                         case .groups: GroupsSettings()
+                        case .logos: LogoSettings()
                         case .export: ExportSettings()
                         case .activity: ActivitySettings()
                         case .appearance: AppearanceSettings()
@@ -337,5 +340,44 @@ struct GroupEditor: View {
         }
         .padding(20)
         .frame(width: 520)
+    }
+}
+
+/// Settings > Logos (decision 0009). The only place devPassword goes online, so it says so.
+struct LogoSettings: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        Form {
+            Section {
+                Label {
+                    Text("Fetching logos is the only thing devPassword does on the internet. It asks each website for its icon file and nothing else. The websites see that someone fetched their icon; your broadband provider sees the site names. Your passwords and records never leave the Mac.")
+                } icon: {
+                    Image(systemName: "exclamationmark.shield").foregroundStyle(.orange)
+                }
+                Text("Fetch once, then fix single records by clicking their icon. There is no need to run this regularly.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Section("Fetch") {
+                LabeledContent("Logos stored", value: "\(model.logos.count)")
+                LabeledContent("Sites without a logo yet", value: "\(model.logosToFetch)")
+                HStack {
+                    Button("Fetch Site Logos") { model.fetchLogos() }
+                        .disabled(model.logoProgress != nil)
+                    Button("Retry Sites With No Logo") { model.retryLogoMisses() }
+                        .disabled(model.logoProgress != nil)
+                    if let p = model.logoProgress {
+                        ProgressView(value: Double(p.done), total: Double(max(p.total, 1))).frame(width: 140)
+                        Text("\(p.done) of \(p.total)").font(.callout).monospacedDigit()
+                        Button("Stop") { model.cancelLogoFetch() }
+                    }
+                }
+            }
+            Section {
+                Text("Logos are kept encrypted with your vault and go into backups, so a restored Mac and the iPhone show them without fetching.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
     }
 }

@@ -82,6 +82,7 @@ Not verified: Touch ID after a fingerprint change; full import of Nino's real mS
 
 ## Session log
 
+- 2026-10-16: Logos in backups (0009 amended, Nino): BackupArchive.sealedLogos (optional, older backups still open), digest in the manifest, integrity-checked on open, restored as logos.sealed beside the vault. Test: backup, restore, logos back; tampered logos refused. Fetch Site Logos and Retry moved from the Vault menu to a new Settings > Logos tab with a plain warning and counts. Not yet compiled.
 - 2026-10-16: Checked: App/devPassword/devPassword.xcodeproj/project.pbxproj and the workspace file are tracked and not ignored. No .gitignore change needed. Plan agreed in principle: iPhone app next, read-only from the encrypted backup until sync; sync (0008) Monday with a two-device smoke test.
 - 2026-10-16: Escape did not close the item window (a zero-size hidden button gets no key equivalent). Replaced with `EscapeCloses`: a local key monitor tied to that window; Escape closes it unless a sheet is attached. Pasted-picture trim confirmed working by Nino. Not yet compiled.
 - 2026-10-16: Still white bars on pasted Amex (Nino). Cause: the grab had white page round the logo, so the corner colour was white. Fix: pasted pictures are read at up to 512 px, any plain border (the corner colour, within a tolerance) is trimmed off, then fitted and padded with the trimmed picture's own edge colour. Existing pasted pictures need pasting again. Test with a blue logo on a white page. Not yet compiled.

@@ -224,6 +224,30 @@ final class SiteLogoTests: XCTestCase {
         XCTAssertTrue(vault.loadLogos().logos.isEmpty, "unreadable while locked")
     }
 
+    func testLogosTravelWithBackups() throws {
+        let dir = tempDir()
+        let (vault, _) = try makeVault(in: dir)
+        var cache = LogoCache()
+        cache.logos["a.test"] = try makePNG(width: 64, height: 64)
+        try vault.saveLogos(cache)
+
+        let url = try Backup.writeToFolder(vault: vault, folder: dir.appendingPathComponent("backups"))
+        let archive = try Backup.read(from: url)
+        XCTAssertNotNil(archive.sealedLogos)
+        let opened = try Backup.open(archive, passphrase: testPassphrase)
+
+        let target = tempDir().appendingPathComponent("vault.sqlite")
+        try Backup.restore(opened, to: target)
+        let restored = try Vault.open(at: target)
+        try restored.unlock(passphrase: testPassphrase)
+        XCTAssertEqual(restored.loadLogos().logos.keys.sorted(), ["a.test"], "logos come back with a restore")
+
+        // A tampered logo block is refused, like a tampered record.
+        var bad = archive
+        bad.sealedLogos = Data(repeating: 1, count: 64)
+        XCTAssertThrowsError(try Backup.open(bad, passphrase: testPassphrase))
+    }
+
     private func makePNG(width: Int, height: Int) throws -> Data {
         let ctx = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                           space: CGColorSpace(name: CGColorSpace.sRGB)!,

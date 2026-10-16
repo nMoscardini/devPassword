@@ -16,6 +16,9 @@ public struct BackupArchive: Codable {
     public var sealedManifest: Data
     /// The vault's group list, still sealed. Nil in backups made before groups existed.
     public var sealedGroups: Data?
+    /// The site logo cache, still sealed (decision 0009), so the iPhone and a restored Mac show
+    /// logos without fetching again. Nil in older backups and when no logos were fetched.
+    public var sealedLogos: Data?
 }
 
 struct BackupManifest: Codable {
@@ -24,6 +27,8 @@ struct BackupManifest: Codable {
     var createdAt: Date
     /// SHA-256 of sealedGroups. Nil when the backup has no groups.
     var groupsDigest: Data?
+    /// SHA-256 of sealedLogos. Nil when the backup has no logos.
+    var logosDigest: Data?
 }
 
 public struct BackupPreview {
@@ -48,14 +53,16 @@ public enum Backup {
         let key = try vault.requireKey()
         let entries = try vault.allSealed()
         let groups = try vault.sealedGroups()
+        let logos = vault.sealedLogos()
         let created = Date()
         let manifest = BackupManifest(entryCount: entries.count, digest: try digest(entries), createdAt: created,
-                                      groupsDigest: groups.map { Data(SHA256.hash(data: $0)) })
+                                      groupsDigest: groups.map { Data(SHA256.hash(data: $0)) },
+                                      logosDigest: logos.map { Data(SHA256.hash(data: $0)) })
         let sealedManifest = try VaultCrypto.seal(try JSONEncoder().encode(manifest), key: key,
                                                   context: vault.header.manifestContext())
         return BackupArchive(format: BackupArchive.formatName, formatVersion: 1, createdAt: created,
                              header: vault.header, entries: entries, sealedManifest: sealedManifest,
-                             sealedGroups: groups)
+                             sealedGroups: groups, sealedLogos: logos)
     }
 
     public static func write(_ archive: BackupArchive, to url: URL) throws {
@@ -120,6 +127,12 @@ public enum Backup {
             } catch {
                 throw VaultError.corrupt("The backup's group list failed its integrity check")
             }
+        }
+        guard manifest.logosDigest == archive.sealedLogos.map({ Data(SHA256.hash(data: $0)) }) else {
+            throw VaultError.corrupt("Backup logos do not match the manifest")
+        }
+        if let logos = archive.sealedLogos, Vault.openLogos(logos, key: key, header: archive.header) == nil {
+            throw VaultError.corrupt("The backup's logos failed their integrity check")
         }
         var counts: [RecordType: Int] = [:]
         var deleted = 0
@@ -202,6 +215,12 @@ public enum Backup {
         try fm.moveItem(at: staging, to: url)
         for suffix in ["-wal", "-shm"] { try? fm.removeItem(atPath: staging.path + suffix) }
         FilePermissions.tighten(url.path)
+        // Logos beside the vault, as the Mac keeps them. Absent in older backups: keep what is there.
+        if let logos = opened.archive.sealedLogos {
+            let logoURL = url.deletingLastPathComponent().appendingPathComponent("logos.sealed")
+            try logos.write(to: logoURL, options: [.atomic])
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: logoURL.path)
+        }
         Log.backup.info("event=backup.restored count=\(opened.archive.entries.count, privacy: .public)")
     }
 

@@ -45,10 +45,6 @@ public struct DevPasswordScenes: Scene {
                     .disabled(!model.isUnlocked)
                 Button("Move from LastPass…") { model.showLastPass = true }
                     .disabled(!model.isUnlocked)
-                Button("Fetch Site Logos") { model.fetchLogos() }
-                    .disabled(!model.isUnlocked || model.logoProgress != nil)
-                Button("Retry Sites With No Logo") { model.retryLogoMisses() }
-                    .disabled(!model.isUnlocked || model.logoProgress != nil)
                 Toggle("Hide Apple Logins", isOn: $model.hideAppleLogins)
                     .keyboardShortcut("a", modifiers: [.command, .shift])
                     .disabled(!model.isUnlocked)

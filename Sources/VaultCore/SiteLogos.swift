@@ -397,11 +397,17 @@ extension Vault {
 
     /// Fails closed: a changed or swapped cache is ignored and refetched.
     public func loadLogos() -> LogoCache {
-        guard let key = try? requireKey(),
-              let sealed = try? Data(contentsOf: logoCacheURL),
-              let plain = try? VaultCrypto.open(sealed, key: key, context: header.logosContext()),
-              let cache = try? JSONDecoder().decode(LogoCache.self, from: plain) else { return LogoCache() }
+        guard let key = try? requireKey(), let sealed = sealedLogos(),
+              let cache = Vault.openLogos(sealed, key: key, header: header) else { return LogoCache() }
         return cache
+    }
+
+    /// The sealed cache file as stored, for backups. Nil if there is none.
+    func sealedLogos() -> Data? { try? Data(contentsOf: logoCacheURL) }
+
+    static func openLogos(_ sealed: Data, key: SymmetricKey, header: VaultHeader) -> LogoCache? {
+        guard let plain = try? VaultCrypto.open(sealed, key: key, context: header.logosContext()) else { return nil }
+        return try? JSONDecoder().decode(LogoCache.self, from: plain)
     }
 
     public func saveLogos(_ cache: LogoCache) throws {
