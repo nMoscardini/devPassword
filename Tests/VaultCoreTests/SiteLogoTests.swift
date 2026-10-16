@@ -224,6 +224,21 @@ final class SiteLogoTests: XCTestCase {
         XCTAssertTrue(vault.loadLogos().logos.isEmpty, "unreadable while locked")
     }
 
+    func testCopiedLogoIsNotTrimmed() throws {
+        // A logo with a white page round it: pasted from outside it is trimmed, copied from devPassword it is not.
+        let page = try makeLogoOnPage(page: 128, logoW: 64, logoH: 24)
+        let copied = try XCTUnwrap(SiteLogos.normaliseCopied(page))
+        let img = try XCTUnwrap(CGImageSourceCreateImageAtIndex(try XCTUnwrap(CGImageSourceCreateWithData(copied as CFData, nil)), 0, nil))
+        var c = [UInt8](repeating: 0, count: 4)
+        c.withUnsafeMutableBytes { buf in
+            let ctx = CGContext(data: buf.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            ctx.draw(img, in: CGRect(x: 0, y: -Double(img.height) + 1, width: Double(img.width), height: Double(img.height)))
+        }
+        XCTAssertGreaterThan(c[0], 200, "corner stays the white page: no trimming")
+        XCTAssertEqual(img.width, SiteLogos.pastedSize)
+    }
+
     func testLogosTravelWithBackups() throws {
         let dir = tempDir()
         let (vault, _) = try makeVault(in: dir)

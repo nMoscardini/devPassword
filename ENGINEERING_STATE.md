@@ -82,6 +82,8 @@ Not verified: Touch ID after a fingerprint change; full import of Nino's real mS
 
 ## Session log
 
+- 2026-10-16: Copy Logo marks the clipboard with its own type (com.nino.devPassword.logo); Paste Picture then uses `normaliseCopied` (redrawn to 128 px, no trimming or padding). Grabs from elsewhere are still trimmed. Test added. Not yet compiled.
+- 2026-10-16: Icon panel > Picture > Copy Logo: copies the logo a record shows (pasted or fetched) to the clipboard as PNG, to paste onto another record. Disabled for letter tiles and symbols. Not yet compiled.
 - 2026-10-16: Logos in backups (0009 amended, Nino): BackupArchive.sealedLogos (optional, older backups still open), digest in the manifest, integrity-checked on open, restored as logos.sealed beside the vault. Test: backup, restore, logos back; tampered logos refused. Fetch Site Logos and Retry moved from the Vault menu to a new Settings > Logos tab with a plain warning and counts. Not yet compiled.
 - 2026-10-16: Checked: App/devPassword/devPassword.xcodeproj/project.pbxproj and the workspace file are tracked and not ignored. No .gitignore change needed. Plan agreed in principle: iPhone app next, read-only from the encrypted backup until sync; sync (0008) Monday with a two-device smoke test.
 - 2026-10-16: Escape did not close the item window (a zero-size hidden button gets no key equivalent). Replaced with `EscapeCloses`: a local key monitor tied to that window; Escape closes it unless a sheet is attached. Pasted-picture trim confirmed working by Nino. Not yet compiled.

@@ -646,8 +646,13 @@ struct LogoSiteView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("1. Grab the logo on screen with Shift-Command-Control-4. It goes to the clipboard.")
             Text("2. Click Paste Picture. devPassword keeps a small copy, a few kilobytes.")
+            Text("To reuse a logo: Copy Logo here, then Paste Picture on the other record.")
+                .foregroundStyle(.secondary)
             HStack {
                 Button("Paste Picture") { status = model.pasteLogo(current) }
+                Button("Copy Logo") { status = model.copyLogo(current) }
+                    .disabled(model.currentLogoImage(for: current) == nil)
+                    .help("Copy this record's logo to paste onto another record")
                 if current.customLogo != nil {
                     Button("Remove Picture") { model.removePastedLogo(current); status = "Picture removed." }
                 }

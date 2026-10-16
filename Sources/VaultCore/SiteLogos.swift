@@ -177,6 +177,12 @@ public enum SiteLogos {
         normalise(data, limit: 50_000_000, side: pastedSize, padWithEdge: true)
     }
 
+    /// A logo copied from another devPassword record: already a clean square, so no trimming or
+    /// padding, just redrawn to the stored size (still decoded fresh, never stored as given).
+    public static func normaliseCopied(_ data: Data) -> Data? {
+        normalise(data, limit: 5_000_000, side: pastedSize, padWithEdge: false)
+    }
+
     /// The average colour of an image's four corners, for filling the gaps when a wide or tall
     /// picture is fitted into a square (the Amex box stays blue, no white bars).
     static func edgeColour(_ img: CGImage) -> CGColor? {

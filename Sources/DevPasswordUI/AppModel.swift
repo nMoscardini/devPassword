@@ -678,17 +678,47 @@ final class AppModel: ObservableObject {
     @Published private(set) var customLogos: [UUID: NSImage] = [:] { didSet { tintCache = [:] } }
 
     /// Takes a picture from the clipboard (a screen grab), shrinks it and makes it the record's logo.
+    /// Marks a logo copied by devPassword (Copy Logo), so pasting it skips the trimming.
+    static let copiedLogoType = NSPasteboard.PasteboardType("com.nino.devPassword.logo")
+
     func pasteLogo(_ entry: Entry) -> String {
         let pb = NSPasteboard.general
-        let raw = pb.data(forType: .png) ?? pb.data(forType: .tiff)
-            ?? NSImage(pasteboard: pb)?.tiffRepresentation
-        guard let raw else { return "There is no picture on the clipboard. Take a screen grab with Shift-Command-Control-4, then paste." }
-        guard let png = SiteLogos.normalisePasted(raw) else { return "That picture could not be used. Try a larger grab." }
+        let png: Data?
+        if let own = pb.data(forType: Self.copiedLogoType) {
+            png = SiteLogos.normaliseCopied(own)          // exact copy: no trimming
+        } else {
+            let raw = pb.data(forType: .png) ?? pb.data(forType: .tiff)
+                ?? NSImage(pasteboard: pb)?.tiffRepresentation
+            guard let raw else { return "There is no picture on the clipboard. Take a screen grab with Shift-Command-Control-4, then paste." }
+            png = SiteLogos.normalisePasted(raw)
+        }
+        guard let png else { return "That picture could not be used. Try a larger grab." }
         var e = entry
         e.customLogo = png
         save(e, touchModified: false)
         vault?.audit("logos.pasted")
         return "Picture saved as the logo (\(png.count / 1024 + 1) KB)."
+    }
+
+    /// The logo a record shows now: its pasted picture, else its site's logo. Nil for tiles and symbols.
+    func currentLogoImage(for e: Entry) -> NSImage? {
+        if let img = customLogos[e.id] { return img }
+        guard SiteLogos.genericSymbol(for: e) == nil, let host = logoHost(for: e) else { return nil }
+        return logo(for: host)
+    }
+
+    /// Copies a record's logo to the clipboard, to paste onto another record.
+    func copyLogo(_ entry: Entry) -> String {
+        guard let img = currentLogoImage(for: entry), let tiff = img.tiffRepresentation,
+              let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else {
+            return "This record shows a letter or a symbol, not a logo, so there is nothing to copy."
+        }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setData(png, forType: Self.copiedLogoType)
+        pb.setData(png, forType: .png)
+        pb.setData(tiff, forType: .tiff)
+        return "Logo copied. Open the other record's icon panel, Picture, Paste Picture."
     }
 
     /// Removes a pasted picture.
