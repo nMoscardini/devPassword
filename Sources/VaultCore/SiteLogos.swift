@@ -168,8 +168,79 @@ public enum SiteLogos {
 
     /// Decodes an image once and redraws it to a square PNG. The site's original bytes are never kept.
     /// Returns nil for anything that is not a usable image.
-    public static func normalise(_ data: Data) -> Data? {
-        guard data.count <= maxBytes,
+    public static func normalise(_ data: Data) -> Data? { normalise(data, limit: maxBytes, side: pixelSize) }
+
+    /// A picture Nino pasted (a screen grab of a logo). Any size in, a 128 by 128 PNG out,
+    /// typically a few kilobytes, so it can live on the record and travel with backups.
+    public static let pastedSize = 128
+    public static func normalisePasted(_ data: Data) -> Data? {
+        normalise(data, limit: 50_000_000, side: pastedSize, padWithEdge: true)
+    }
+
+    /// The average colour of an image's four corners, for filling the gaps when a wide or tall
+    /// picture is fitted into a square (the Amex box stays blue, no white bars).
+    static func edgeColour(_ img: CGImage) -> CGColor? {
+        let side = 8
+        var px = [UInt8](repeating: 0, count: side * side * 4)
+        let ok: Bool = px.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: side, height: side, bitsPerComponent: 8,
+                                      bytesPerRow: side * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return true
+        }
+        guard ok else { return nil }
+        var r = 0.0, g = 0.0, b = 0.0, a = 0.0
+        for (x, y) in [(0, 0), (side - 1, 0), (0, side - 1), (side - 1, side - 1)] {
+            let i = (y * side + x) * 4
+            r += Double(px[i]); g += Double(px[i + 1]); b += Double(px[i + 2]); a += Double(px[i + 3])
+        }
+        guard a / 4 > 200 else { return nil }   // transparent corners: leave the gaps clear
+        return CGColor(srgbRed: r / 4 / 255, green: g / 4 / 255, blue: b / 4 / 255, alpha: 1)
+    }
+
+    /// Cuts off a plain border (white page, or any single colour) around a pasted grab, so a loose
+    /// grab gives the same result as a tight one. Returns the image unchanged if there is no border
+    /// or if trimming would leave almost nothing.
+    static func trimBorder(_ img: CGImage) -> CGImage {
+        let w = img.width, h = img.height
+        guard w > 8, h > 8 else { return img }
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        let ok: Bool = px.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8,
+                                      bytesPerRow: w * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard ok else { return img }
+        // Row 0 in the buffer is the top of the picture.
+        func at(_ x: Int, _ y: Int) -> (Int, Int, Int, Int) {
+            let i = (y * w + x) * 4
+            return (Int(px[i]), Int(px[i + 1]), Int(px[i + 2]), Int(px[i + 3]))
+        }
+        let corners = [at(0, 0), at(w - 1, 0), at(0, h - 1), at(w - 1, h - 1)]
+        let bg = (corners.map(\.0).reduce(0, +) / 4, corners.map(\.1).reduce(0, +) / 4,
+                  corners.map(\.2).reduce(0, +) / 4, corners.map(\.3).reduce(0, +) / 4)
+        func isBackground(_ p: (Int, Int, Int, Int)) -> Bool {
+            abs(p.0 - bg.0) + abs(p.1 - bg.1) + abs(p.2 - bg.2) + abs(p.3 - bg.3) < 60
+        }
+        var minX = w, minY = h, maxX = -1, maxY = -1
+        for y in 0..<h {
+            for x in 0..<w where !isBackground(at(x, y)) {
+                if x < minX { minX = x }
+                if x > maxX { maxX = x }
+                if y < minY { minY = y }
+                if y > maxY { maxY = y }
+            }
+        }
+        guard maxX >= minX, maxY >= minY, maxX - minX >= 8, maxY - minY >= 8 else { return img }
+        if minX == 0 && minY == 0 && maxX == w - 1 && maxY == h - 1 { return img }
+        return img.cropping(to: CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)) ?? img
+    }
+
+    static func normalise(_ data: Data, limit: Int, side: Int, padWithEdge: Bool = false) -> Data? {
+        guard data.count <= limit,
               let src = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
         let count = CGImageSourceGetCount(src)
         guard count > 0 else { return nil }
@@ -181,16 +252,21 @@ public enum SiteLogos {
             if w > bestWidth { best = i; bestWidth = w }
         }
         guard bestWidth >= 16 else { return nil }
+        // A pasted grab is read larger, trimmed of any plain border, then drawn down to size.
         let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                                     kCGImageSourceThumbnailMaxPixelSize: pixelSize,
+                                     kCGImageSourceThumbnailMaxPixelSize: padWithEdge ? 512 : side,
                                      kCGImageSourceCreateThumbnailWithTransform: true]
-        guard let img = CGImageSourceCreateThumbnailAtIndex(src, best, opts as CFDictionary) else { return nil }
+        guard let read = CGImageSourceCreateThumbnailAtIndex(src, best, opts as CFDictionary) else { return nil }
+        let img = padWithEdge ? trimBorder(read) : read
 
-        let side = pixelSize
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.interpolationQuality = .high
+        if padWithEdge, img.width != img.height, let edge = edgeColour(img) {
+            ctx.setFillColor(edge)
+            ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        }
         let scale = min(Double(side) / Double(img.width), Double(side) / Double(img.height))
         let w = Double(img.width) * scale, h = Double(img.height) * scale
         ctx.draw(img, in: CGRect(x: (Double(side) - w) / 2, y: (Double(side) - h) / 2, width: w, height: h))

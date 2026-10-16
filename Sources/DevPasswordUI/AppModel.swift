@@ -13,6 +13,8 @@ enum Screen: Equatable {
 
 enum SidebarFilter: Hashable {
     case all, favourites, expiring, deleted
+    /// Records Nino archived: old but kept.
+    case archived
     /// Logins imported from Apple Passwords (decision 0007) that Apple still has.
     case apple
     /// Apple-imported logins that a later import no longer contained. Kept as the last known copy.
@@ -23,6 +25,11 @@ enum SidebarFilter: Hashable {
 
 /// App state. Main actor only. Decrypted records live in memory while unlocked and are
 /// dropped on lock.
+/// The middle column as a list or as cards. Per Mac.
+enum ListStyleChoice: String {
+    case list, cards
+}
+
 enum ListSortOrder: String, CaseIterable, Identifiable {
     case name, newest, oldest
     var id: String { rawValue }
@@ -51,6 +58,13 @@ final class AppModel: ObservableObject {
     @Published var showGenerator = false
     @Published var showImport = false
     @Published var showAppleImport = false
+    /// Sidebar as coloured tiles (on) or a plain list (off). Per Mac.
+    @Published var sidebarTiles: Bool = UserDefaults.standard.object(forKey: "sidebarTiles") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sidebarTiles, forKey: "sidebarTiles") }
+    }
+    @Published var listStyle: ListStyleChoice = ListStyleChoice(rawValue: UserDefaults.standard.string(forKey: "listStyle") ?? "") ?? .list {
+        didSet { UserDefaults.standard.set(listStyle.rawValue, forKey: "listStyle") }
+    }
     @Published var showLastPass = false
     /// Site logos by host (decision 0009). Loaded at unlock from the sealed cache, dropped on lock.
     @Published var logos: [String: NSImage] = [:] { didSet { rebuildLogoLabels() } }
@@ -72,10 +86,32 @@ final class AppModel: ObservableObject {
         return logosByLabel[l]
     }
 
+    /// Card band colour (SiteIcon rules): a logo's own main colour; a letter tile's colour;
+    /// grey for a generic symbol. Same logo, same colour, so every BA card matches.
+    func cardTint(for e: Entry) -> Color {
+        let neutral = Color(red: 0.55, green: 0.57, blue: 0.60)
+        if let img = customLogos[e.id] { return tint(of: img, key: "id:" + e.id.uuidString) ?? neutral }
+        if SiteLogos.genericSymbol(for: e) != nil { return neutral }
+        let host = logoHost(for: e)
+        if let host, let img = logo(for: host) { return tint(of: img, key: SiteLogos.label(ofHost: host)) ?? neutral }
+        if host == nil && !(e.type == .login && e.icon == nil) { return neutral }   // records showing their type symbol
+        return LetterTile.colour(for: host ?? SiteIcon.tileText(e))
+    }
+
+    private var tintCache: [String: Color] = [:]
+
+    private func tint(of img: NSImage, key: String) -> Color? {
+        if let c = tintCache[key] { return c }
+        let c = SiteIcon.dominantColour(img)
+        if let c { tintCache[key] = c }
+        return c
+    }
+
     /// Main name -> a logo, rebuilt whenever logos change.
     private var logosByLabel: [String: NSImage] = [:]
 
     private func rebuildLogoLabels() {
+        tintCache = [:]
         var out: [String: NSImage] = [:]
         for host in logos.keys.sorted(by: { $0.count < $1.count }) {   // shortest host wins: the main site
             let l = SiteLogos.label(ofHost: host)
@@ -389,6 +425,7 @@ final class AppModel: ObservableObject {
         logoTask = nil
         logoProgress = nil
         logos = [:]
+        customLogos = [:]
         logoCache = LogoCache()
         sensorLockedOut = false
         sensorMessage = nil
@@ -403,6 +440,9 @@ final class AppModel: ObservableObject {
         do {
             let r = try vault.loadAll()
             logoLabelIndex = SiteLogos.labelIndex(r.entries)
+            var pasted: [UUID: NSImage] = [:]
+            for e in r.entries { if let d = e.customLogo, let img = NSImage(data: d) { pasted[e.id] = img } }
+            customLogos = pasted
             entries = r.entries
             integrityFailures = r.failedIDs.count
         } catch {
@@ -434,8 +474,11 @@ final class AppModel: ObservableObject {
             case .group(let id): return !e.isDeleted && e.groupID == id
             case .apple: return !e.isDeleted && e.isAppleSnapshot && e.appleRemovedAt == nil
             case .appleRemoved: return !e.isDeleted && e.isAppleSnapshot && e.appleRemovedAt != nil
+            case .archived: return !e.isDeleted && e.isArchived
             }
         }
+        // Archived records live only in the Archive list (and Deleted, if deleted).
+        if f != .archived && f != .deleted { list = list.filter { !$0.isArchived } }
         // Favourites were chosen by hand, so they stay visible.
         if hideAppleLogins && f != .apple && f != .appleRemoved && f != .favourites {
             list = list.filter { !$0.isAppleSnapshot }
@@ -631,12 +674,36 @@ final class AppModel: ObservableObject {
         return "\(host) gave no usable logo. Try another address for the same company, such as its main .com site."
     }
 
+    /// Pasted pictures, decoded once per reload.
+    @Published private(set) var customLogos: [UUID: NSImage] = [:] { didSet { tintCache = [:] } }
+
+    /// Takes a picture from the clipboard (a screen grab), shrinks it and makes it the record's logo.
+    func pasteLogo(_ entry: Entry) -> String {
+        let pb = NSPasteboard.general
+        let raw = pb.data(forType: .png) ?? pb.data(forType: .tiff)
+            ?? NSImage(pasteboard: pb)?.tiffRepresentation
+        guard let raw else { return "There is no picture on the clipboard. Take a screen grab with Shift-Command-Control-4, then paste." }
+        guard let png = SiteLogos.normalisePasted(raw) else { return "That picture could not be used. Try a larger grab." }
+        var e = entry
+        e.customLogo = png
+        save(e, touchModified: false)
+        vault?.audit("logos.pasted")
+        return "Picture saved as the logo (\(png.count / 1024 + 1) KB)."
+    }
+
+    /// Removes a pasted picture.
+    func removePastedLogo(_ entry: Entry) {
+        var e = entry
+        e.customLogo = nil
+        save(e, touchModified: false)
+    }
+
     /// Sets the record's own symbol (nil: back to automatic). A chosen symbol replaces any logo website,
     /// so what Nino picked is what he sees.
     func setIcon(_ entry: Entry, to symbol: String?) {
         var e = entry
         e.icon = symbol
-        if symbol != nil { e.logoSite = nil }
+        if symbol != nil { e.logoSite = nil; e.customLogo = nil }
         save(e, touchModified: false)
     }
 
@@ -647,12 +714,14 @@ final class AppModel: ObservableObject {
         let trimmed = site?.trimmingCharacters(in: .whitespaces) ?? ""
         if trimmed.isEmpty {
             e.logoSite = nil
+            e.customLogo = nil
         } else {
             guard SiteLogos.fetchableHost(trimmed) != nil else {
                 return "\(trimmed) is not a website address devPassword can ask. Use a name like ba.com."
             }
             e.logoSite = trimmed
             e.icon = nil
+            e.customLogo = nil
         }
         save(e, touchModified: false)
         guard let saved = entries.first(where: { $0.id == e.id }) else { return "" }
@@ -733,6 +802,17 @@ final class AppModel: ObservableObject {
         save(e)
         vault?.audit("entry.moved_to_deleted")
         selection = nil
+    }
+
+    var hasArchived: Bool { entries.contains { $0.isArchived && !$0.isDeleted } }
+
+    /// Archive (old but kept) or bring back. Keeps the record's changed date.
+    func setArchived(_ entry: Entry, _ archived: Bool) {
+        var e = entry
+        e.archivedAt = archived ? Date() : nil
+        save(e, touchModified: false)
+        vault?.audit(archived ? "entry.archived" : "entry.unarchived")
+        if archived && filter != .archived { selection = nil }
     }
 
     /// Puts one item back from the Deleted list. Not the same as restoring a backup.

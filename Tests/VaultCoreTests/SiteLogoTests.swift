@@ -109,6 +109,84 @@ final class SiteLogoTests: XCTestCase {
         XCTAssertNotEqual(out, png, "the original bytes are never kept")
     }
 
+    func testPastedPictureIsShrunkWhateverItsSize() throws {
+        let big = try makeNoisyPNG(width: 900, height: 500)
+        XCTAssertGreaterThan(big.count, SiteLogos.maxBytes, "a screen grab is bigger than a fetched icon may be")
+        let out = try XCTUnwrap(SiteLogos.normalisePasted(big))
+        let img = try XCTUnwrap(CGImageSourceCreateImageAtIndex(try XCTUnwrap(CGImageSourceCreateWithData(out as CFData, nil)), 0, nil))
+        XCTAssertEqual(img.width, SiteLogos.pastedSize)
+        XCTAssertEqual(img.height, SiteLogos.pastedSize)
+        XCTAssertLessThan(out.count, 80_000)
+
+        // A wide solid-blue grab fills the whole square with blue: no white or clear bars.
+        let wide = try XCTUnwrap(SiteLogos.normalisePasted(try makePNG(width: 300, height: 120)))
+        let wimg = try XCTUnwrap(CGImageSourceCreateImageAtIndex(try XCTUnwrap(CGImageSourceCreateWithData(wide as CFData, nil)), 0, nil))
+        var corner = [UInt8](repeating: 0, count: 4)
+        corner.withUnsafeMutableBytes { buf in
+            let c = CGContext(data: buf.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            c.draw(wimg, in: CGRect(x: 0, y: -Double(wimg.height) + 1, width: Double(wimg.width), height: Double(wimg.height)))
+        }
+        XCTAssertGreaterThan(corner[3], 200, "top-left corner is filled, not transparent")
+        XCTAssertGreaterThan(corner[2], corner[0], "and it is the picture's blue")
+
+        // A loose grab: a blue logo on a white page. The white is trimmed away; corners end up blue.
+        let loose = try makeLogoOnPage(page: 400, logoW: 200, logoH: 80)
+        let trimmed = try XCTUnwrap(SiteLogos.normalisePasted(loose))
+        let timg = try XCTUnwrap(CGImageSourceCreateImageAtIndex(try XCTUnwrap(CGImageSourceCreateWithData(trimmed as CFData, nil)), 0, nil))
+        var tc = [UInt8](repeating: 0, count: 4)
+        tc.withUnsafeMutableBytes { buf in
+            let c = CGContext(data: buf.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            c.draw(timg, in: CGRect(x: 0, y: -Double(timg.height) + 1, width: Double(timg.width), height: Double(timg.height)))
+        }
+        XCTAssertGreaterThan(tc[2], 150, "corner is the logo's blue")
+        XCTAssertLessThan(tc[0], 120, "not the white page")
+
+        let (vault, _) = try makeVault()
+        var e = Entry(type: .secureNote, title: "Front door")
+        e.customLogo = out
+        try vault.save(e)
+        XCTAssertEqual(try vault.loadAll().entries.first?.customLogo, out, "kept with the record")
+    }
+
+    /// A blue rectangle in the middle of a white square "page", like a loose screen grab.
+    private func makeLogoOnPage(page: Int, logoW: Int, logoH: Int) throws -> Data {
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: page, height: page, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: page, height: page))
+        ctx.setFillColor(CGColor(red: 0.0, green: 0.4, blue: 0.85, alpha: 1))
+        ctx.fill(CGRect(x: (page - logoW) / 2, y: (page - logoH) / 2, width: logoW, height: logoH))
+        let img = try XCTUnwrap(ctx.makeImage())
+        let buf = NSMutableData()
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithData(buf, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, img, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        return buf as Data
+    }
+
+    private func makeNoisyPNG(width: Int, height: Int) throws -> Data {
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        var rng = SystemRandomNumberGenerator()
+        for y in stride(from: 0, to: height, by: 2) {
+            for x in stride(from: 0, to: width, by: 2) {
+                ctx.setFillColor(CGColor(red: .random(in: 0...1, using: &rng), green: .random(in: 0...1, using: &rng),
+                                         blue: .random(in: 0...1, using: &rng), alpha: 1))
+                ctx.fill(CGRect(x: x, y: y, width: 2, height: 2))
+            }
+        }
+        let img = try XCTUnwrap(ctx.makeImage())
+        let buf = NSMutableData()
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithData(buf, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, img, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        return buf as Data
+    }
+
     func testRejectsJunkTinyAndOversized() throws {
         XCTAssertNil(SiteLogos.normalise(Data("<html>not an image</html>".utf8)))
         XCTAssertNil(SiteLogos.normalise(try makePNG(width: 8, height: 8)))

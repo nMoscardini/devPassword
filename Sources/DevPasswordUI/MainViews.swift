@@ -4,23 +4,43 @@ import VaultCore
 struct MainView: View {
     @EnvironmentObject var model: AppModel
 
-    var body: some View {
-        NavigationSplitView {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 190, ideal: 210)
-        } content: {
-            EntryListView()
-                .navigationSplitViewColumnWidth(min: 260, ideal: 300)
-        } detail: {
-            if let id = model.selection, let entry = model.entries.first(where: { $0.id == id }) {
-                EntryDetailView(entry: entry).id(entry.id)   // new id resets reveal state
-                    .paneBackground(.detail)
-            } else {
-                ContentUnavailableView("No item selected", systemImage: "lock.open")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .paneBackground(.detail)
+    /// List view: three columns. Cards view: two columns, the cards take the whole width;
+    /// details open in the item's own window on double-click.
+    @ViewBuilder private var split: some View {
+        if model.listStyle == .cards {
+            NavigationSplitView {
+                SidebarView()
+                    .navigationSplitViewColumnWidth(min: 190, ideal: 220)
+            } detail: {
+                // Cards keep the whole width. Click selects; double-click opens the item's own window.
+                EntryListView()
+            }
+        } else {
+            NavigationSplitView {
+                SidebarView()
+                    .navigationSplitViewColumnWidth(min: 190, ideal: 210)
+            } content: {
+                EntryListView()
+                    .navigationSplitViewColumnWidth(min: 260, ideal: 300)
+            } detail: {
+                selectedDetail
             }
         }
+    }
+
+    @ViewBuilder private var selectedDetail: some View {
+        if let id = model.selection, let entry = model.entries.first(where: { $0.id == id }) {
+            EntryDetailView(entry: entry).id(entry.id)   // new id resets reveal state
+                .paneBackground(.detail)
+        } else {
+            ContentUnavailableView("No item selected", systemImage: "lock.open")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .paneBackground(.detail)
+        }
+    }
+
+    var body: some View {
+        split
         .searchable(text: $model.search, placement: .toolbar, prompt: "Search")
         .toolbar {
             ToolbarItemGroup {
@@ -40,6 +60,12 @@ struct MainView: View {
                     Label("Sort", systemImage: "arrow.up.arrow.down")
                 }
                 .help("Sort by name or by when items were last changed")
+                Picker("View", selection: $model.listStyle) {
+                    Label("List", systemImage: "list.bullet").tag(ListStyleChoice.list)
+                    Label("Cards", systemImage: "square.grid.2x2").tag(ListStyleChoice.cards)
+                }
+                .pickerStyle(.segmented)
+                .help("Show items as a list or as cards")
                 if model.hasAppleLogins {
                     Toggle(isOn: $model.hideAppleLogins) {
                         Label("Hide Apple Logins", systemImage: "apple.logo")
@@ -107,20 +133,57 @@ struct SidebarView: View {
     private static let bottom: [SidebarFilter?] = [.deleted]
 
     var body: some View {
-        let groupRows: [SidebarFilter?] = model.groups.map { Optional(SidebarFilter.group($0.id)) }
+        // Coloured tiles at the top (like Apple Passwords), groups as tiles, types as a plain list.
+        let tops: [SidebarFilter] = [.all, .favourites, .expiring]
+            + (model.hasAppleLogins ? [.apple] : [])
+            + (model.hasRemovedAppleLogins ? [.appleRemoved] : [])
+            + (model.hasArchived ? [.archived] : [])
+            + [.deleted]
         List(selection: $model.filter) {
-            Section { rows(Self.top) }
-            if !groupRows.isEmpty {
-                Section("Groups") { rows(groupRows) }
+            if model.sidebarTiles {
+                Section { tiles(tops) }
+                if !model.groups.isEmpty {
+                    Section("Groups") { tiles(model.groups.map { SidebarFilter.group($0.id) }) }
+                }
+            } else {
+                Section { rows([.all, .favourites, .expiring]) }
+                if !model.groups.isEmpty {
+                    Section("Groups") { rows(model.groups.map { Optional(SidebarFilter.group($0.id)) }) }
+                }
             }
             Section("Types") { rows(Self.types) }
-            Section {
-                rows((model.hasAppleLogins ? [Optional(SidebarFilter.apple)] : [])
-                     + (model.hasRemovedAppleLogins ? [Optional(SidebarFilter.appleRemoved)] : [])
-                     + Self.bottom)
+            if !model.sidebarTiles {
+                Section { rows(Array(tops.dropFirst(3)).map { Optional($0) }) }
             }
         }
         .paneBackground(.sidebar)
+    }
+
+    /// Two tiles to a row. Tapping a tile sets the filter; the tile shows its own selection.
+    private func tiles(_ filters: [SidebarFilter]) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+            ForEach(filters, id: \.self) { f in
+                SidebarTile(title: title(f), symbol: symbol(f), colour: tileColour(f), count: model.count(f),
+                            selected: model.filter == f) { model.filter = f }
+            }
+        }
+        .padding(.vertical, 4)
+        .listRowInsets(EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6))
+        .selectionDisabled()
+    }
+
+    private func tileColour(_ f: SidebarFilter) -> Color {
+        switch f {
+        case .all: return Color(red: 0.0, green: 0.48, blue: 1.0)
+        case .favourites: return Color(red: 1.0, green: 0.62, blue: 0.0)
+        case .expiring: return Color(red: 0.92, green: 0.26, blue: 0.21)
+        case .apple: return Color(red: 0.25, green: 0.25, blue: 0.28)
+        case .appleRemoved: return Color(red: 0.55, green: 0.55, blue: 0.58)
+        case .deleted: return Color(red: 0.95, green: 0.55, blue: 0.10)
+        case .archived: return Color(red: 0.55, green: 0.45, blue: 0.35)
+        case .group(let id): return LetterTile.colour(for: model.groups.first { $0.id == id }?.name ?? "")
+        case .type(let t): return IconStyle.color(for: t.symbol)
+        }
     }
 
     private func rows(_ filters: [SidebarFilter?]) -> some View {
@@ -139,6 +202,7 @@ struct SidebarView: View {
         case .favourites: return "Favourites"
         case .expiring: return "Expiring Soon"
         case .deleted: return "Deleted"
+        case .archived: return "Archive"
         case .apple: return "Apple Passwords"
         case .appleRemoved: return "Removed from Apple"
         case .type(let t): return t.pluralName
@@ -152,6 +216,7 @@ struct SidebarView: View {
         case .favourites: return "star"
         case .expiring: return "calendar.badge.exclamationmark"
         case .deleted: return "trash"
+        case .archived: return "archivebox"
         case .apple: return "apple.logo"
         case .appleRemoved: return "minus.circle"
         case .type(let t): return t.symbol
@@ -166,6 +231,23 @@ struct EntryListView: View {
 
     var body: some View {
         let items = model.visibleEntries
+        Group {
+            if model.listStyle == .cards {
+                EntryCardsView(items: items)
+            } else {
+                list(items)
+            }
+        }
+        .paneBackground(.list)
+        .overlay {
+            if items.isEmpty {
+                ContentUnavailableView(model.search.isEmpty ? "Nothing here" : "No results",
+                                       systemImage: model.search.isEmpty ? "tray" : "magnifyingglass")
+            }
+        }
+    }
+
+    private func list(_ items: [Entry]) -> some View {
         List(items, selection: $model.selection) { e in
             HStack(spacing: 10) {
                 SiteIcon(entry: e, size: 24)
@@ -211,13 +293,6 @@ struct EntryListView: View {
             // Double-click or Return: open in its own window.
             for id in ids { openWindow(id: "item", value: id) }
         }
-        .paneBackground(.list)
-        .overlay {
-            if items.isEmpty {
-                ContentUnavailableView(model.search.isEmpty ? "Nothing here" : "No results",
-                                       systemImage: model.search.isEmpty ? "tray" : "magnifyingglass")
-            }
-        }
     }
 
     private func expiryText(_ e: Entry) -> String {
@@ -241,7 +316,7 @@ struct EntryDetailView: View {
                     Button { showLogo = true } label: { SiteIcon(entry: entry, size: 40) }
                         .buttonStyle(.plain)
                         .help("Choose the website this record's logo comes from")
-                        .popover(isPresented: $showLogo, arrowEdge: .bottom) {
+                        .sheet(isPresented: $showLogo) {
                             LogoSiteView(entry: entry).environmentObject(model)
                         }
                     VStack(alignment: .leading) {
@@ -261,6 +336,10 @@ struct EntryDetailView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Change…") { showLogo = true }
                         .buttonStyle(.link).font(.caption)
+                }
+                if entry.isArchived, let at = entry.archivedAt {
+                    Label("Archived \(at.formatted(date: .abbreviated, time: .omitted)). Old but kept.", systemImage: "archivebox")
+                        .foregroundStyle(.secondary)
                 }
                 if entry.isAppleSnapshot {
                     VStack(alignment: .leading, spacing: 4) {
@@ -373,6 +452,11 @@ struct EntryDetailView: View {
                     groupMenu
                     Button { model.editing = entry } label: { Label("Edit", systemImage: "pencil") }
                         .keyboardShortcut("e", modifiers: [.command])
+                    Button { model.setArchived(entry, !entry.isArchived) } label: {
+                        Label(entry.isArchived ? "Unarchive" : "Archive",
+                              systemImage: entry.isArchived ? "arrow.uturn.backward.circle" : "archivebox")
+                    }
+                    .help(entry.isArchived ? "Bring back into the main lists" : "Old but kept: move to the Archive")
                     Button { model.moveToDeleted(entry) } label: { Label("Move to Deleted", systemImage: "trash") }
                         .help("Move to the Deleted list. You can put it back from there.")
                 }
@@ -474,62 +558,245 @@ struct FieldRow: View {
     }
 }
 
-/// Click a record's icon: choose the website its logo comes from, fetch it now, see the result.
+/// Click a record's icon: logo from a website, a pasted picture, or a symbol. One tab at a time.
 struct LogoSiteView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
     let entry: Entry
+    /// The icon settings when the sheet opened, so Cancel can put them back.
+    @State private var original: (icon: String?, site: String?, picture: Data?)?
+    @State private var tab: Tab = .website
     @State private var site = ""
     @State private var status = ""
     @State private var busy = false
 
+    enum Tab: String, CaseIterable, Identifiable {
+        case website = "Website", picture = "Picture", symbol = "Symbol"
+        var id: String { rawValue }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Icon for \(entry.displayTitle)").font(.headline)
-            Text("Logo from a website").font(.subheadline).foregroundStyle(.secondary)
-            HStack(spacing: 10) {
-                SiteIcon(entry: current, size: 32)
-                TextField("Website", text: $site, prompt: Text("For example ba.com"))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 220)
-                    .onSubmit(get)
-            }
-            HStack {
-                Button("Get Logo", action: get)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(busy || site.trimmingCharacters(in: .whitespaces).isEmpty)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                SiteIcon(entry: current, size: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(current.displayTitle).font(.headline).lineLimit(1)
+                    Text(describe).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
                 Button("Use Default") { run(nil) }
-                    .disabled(busy || current.logoSite == nil)
-                if busy { ProgressView().controlSize(.small) }
+                    .disabled(busy || (current.logoSite == nil && current.customLogo == nil && current.icon == nil))
             }
+            Picker("", selection: $tab) {
+                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            Group {
+                switch tab {
+                case .website: websiteTab
+                case .picture: pictureTab
+                case .symbol: symbolTab
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             if !status.isEmpty {
                 Text(status).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Text("Only that site's icon file is fetched. Your passwords never leave the Mac.")
-                .font(.caption).foregroundStyle(.tertiary)
+
             Divider()
-            Text("Or a symbol").font(.subheadline).foregroundStyle(.secondary)
-            IconPicker(selection: Binding(get: { current.icon },
-                                          set: { model.setIcon(current, to: $0); status = "" }),
-                       typeSymbol: current.type.symbol,
-                       resetTitle: "Automatic")
+            HStack {
+                Text("Stays open while you visit the website. Changes show at once.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel") { cancel() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Done") { dismiss() }
+            }
         }
-        .padding(16)
-        .frame(width: 380)
-        .onAppear { site = current.logoSite ?? model.logoHost(for: current) ?? "" }
+        .padding(18)
+        .frame(width: 560)
+        .interactiveDismissDisabled()
+        .onAppear {
+            if original == nil { original = (current.icon, current.logoSite, current.customLogo) }
+            site = current.logoSite ?? model.logoHost(for: current) ?? ""
+            tab = current.customLogo != nil ? .picture : (current.icon != nil ? .symbol : .website)
+        }
+    }
+
+    private var websiteTab: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                TextField("Website", text: $site, prompt: Text("For example ba.com"))
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { run(site) }
+                Button("Get Logo") { run(site) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(busy || site.trimmingCharacters(in: .whitespaces).isEmpty)
+                if busy { ProgressView().controlSize(.small) }
+            }
+            Text("Only that site's icon file is fetched. Your passwords never leave the Mac.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var pictureTab: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("1. Grab the logo on screen with Shift-Command-Control-4. It goes to the clipboard.")
+            Text("2. Click Paste Picture. devPassword keeps a small copy, a few kilobytes.")
+            HStack {
+                Button("Paste Picture") { status = model.pasteLogo(current) }
+                if current.customLogo != nil {
+                    Button("Remove Picture") { model.removePastedLogo(current); status = "Picture removed." }
+                }
+            }
+        }
+        .font(.callout)
+    }
+
+    private var symbolTab: some View {
+        IconPicker(selection: Binding(get: { current.icon },
+                                      set: { model.setIcon(current, to: $0); status = "" }),
+                   typeSymbol: current.type.symbol,
+                   resetTitle: "No Symbol")
+    }
+
+    /// One line saying where the icon comes from now.
+    private var describe: String {
+        if current.customLogo != nil { return "Pasted picture" }
+        if let i = current.icon { return "Symbol: \(i)" }
+        if let s = current.logoSite { return "Logo from \(s)" }
+        if let h = model.logoHost(for: current) { return "Logo from \(h) (automatic)" }
+        return "Automatic"
+    }
+
+    /// Puts the icon back as it was when the sheet opened, then closes.
+    private func cancel() {
+        if let o = original, o.icon != current.icon || o.site != current.logoSite || o.picture != current.customLogo {
+            var e = current
+            e.icon = o.icon
+            e.logoSite = o.site
+            e.customLogo = o.picture
+            model.save(e, touchModified: false)
+        }
+        dismiss()
     }
 
     /// The record as it is now, after any save.
     private var current: Entry { model.entries.first { $0.id == entry.id } ?? entry }
-
-    private func get() { run(site) }
 
     private func run(_ value: String?) {
         busy = true
         status = ""
         Task {
             status = await model.setLogoSite(current, to: value)
-            if value == nil { site = model.logoHost(for: current) ?? "" }
+            if value == nil {
+                if current.icon != nil { model.setIcon(current, to: nil) }
+                site = model.logoHost(for: current) ?? ""
+            }
             busy = false
         }
+    }
+}
+
+/// A coloured sidebar tile: icon in a circle, count, name. Like the tiles in Apple Passwords.
+struct SidebarTile: View {
+    let title: String
+    let symbol: String
+    let colour: Color
+    let count: Int
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Circle().fill(selected ? Color.white : colour)
+                        .frame(width: 26, height: 26)
+                        .overlay(tileIcon.foregroundStyle(selected ? colour : Color.white))
+                    Spacer()
+                    Text("\(count)").font(.system(.callout, design: .rounded).weight(.semibold))
+                        .foregroundStyle(selected ? Color.white : Color.secondary)
+                }
+                Text(title).font(.callout.weight(.medium)).lineLimit(1)
+                    .foregroundStyle(selected ? Color.white : Color.primary)
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(selected ? colour : Color.secondary.opacity(0.10)))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(count)")
+    }
+
+    /// Plain white symbol: ItemIcon would apply the "coloured icons" setting on top of the tile colour.
+    @ViewBuilder private var tileIcon: some View {
+        if IconStyle.isCustom(symbol) {
+            IconStyle.image(symbol).resizable().scaledToFit().frame(width: 15, height: 12)
+        } else {
+            IconStyle.image(symbol).font(.system(size: 12, weight: .semibold))
+        }
+    }
+}
+
+/// The middle column as cards (like LastPass): logo on a tinted band, name, username.
+struct EntryCardsView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+    let items: [Entry]
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 10)], spacing: 10) {
+                ForEach(items) { e in
+                    card(e)
+                        .onTapGesture(count: 2) { openWindow(id: "item", value: e.id) }
+                        .onTapGesture { model.selection = e.id }
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        // Click empty space to clear the selection.
+        .background(Color.clear.contentShape(Rectangle()).onTapGesture { model.selection = nil })
+    }
+
+    private func card(_ e: Entry) -> some View {
+        let selected = model.selection == e.id
+        let tint = model.cardTint(for: e)
+        return VStack(spacing: 0) {
+            ZStack(alignment: .topTrailing) {
+                Rectangle().fill(tint.opacity(0.22))
+                    .frame(height: 44)
+                    .overlay(SiteIcon(entry: e, size: 32))
+                HStack(spacing: 3) {
+                    if e.isAppleSnapshot { Image(systemName: "apple.logo") }
+                    if e.favourite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(5)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(e.displayTitle).font(.callout.weight(.medium)).lineLimit(1)
+                Text(e.subtitle.isEmpty ? e.type.displayName : e.subtitle)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.10), lineWidth: selected ? 2 : 1))
+        .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+        .contentShape(Rectangle())
+        .help(e.displayTitle)
     }
 }

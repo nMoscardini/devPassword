@@ -25,6 +25,14 @@ public struct DevPasswordScenes: Scene {
                         .disabled(!model.isUnlocked)
                 }
             }
+            CommandGroup(after: .sidebar) {
+                Toggle("Sidebar Tiles", isOn: $model.sidebarTiles)
+                Picker("Items", selection: $model.listStyle) {
+                    Text("As List").tag(ListStyleChoice.list)
+                    Text("As Cards").tag(ListStyleChoice.cards)
+                }
+                Divider()
+            }
             CommandMenu("Vault") {
                 Button("Lock") { model.lockManually() }
                     .keyboardShortcut("l", modifiers: [.command])
@@ -145,9 +153,39 @@ struct ItemWindow: View {
         }
         .frame(minWidth: 480, minHeight: 400)
         .onChange(of: model.isUnlocked) { _, unlocked in if !unlocked { close() } }
+        // Escape closes this window. A sheet open on top (the icon panel) takes Escape first.
+        .background(EscapeCloses())
     }
 
     private func close() {
         dismissWindow(id: "item", value: id)
+    }
+}
+
+/// Closes the window it sits in when Escape is pressed there, unless a sheet is attached
+/// (the sheet gets Escape). Watches key presses only while the view is in a window.
+struct EscapeCloses: NSViewRepresentable {
+    func makeNSView(context: Context) -> Watcher { Watcher() }
+    func updateNSView(_ view: Watcher, context: Context) {}
+
+    final class Watcher: NSView {
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, let win = self.window, event.keyCode == 53,   // Escape
+                      event.window === win, win.attachedSheet == nil else { return event }
+                win.performClose(nil)
+                return nil
+            }
+        }
+
+        deinit {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+        }
     }
 }

@@ -182,6 +182,19 @@ final class AppleImportTests: XCTestCase {
                        "titles Nino typed are left alone")
     }
 
+    func testArchiveSurvivesAnAppleImport() throws {
+        let (vault, _) = try makeVault()
+        let rows = ["a.test (u),https://a.test/,u,pw,,"]
+        try AppleImport.apply(AppleImport.plan(try AppleImport.parse(csv(rows)).logins, existing: []), to: vault)
+        var e = try vault.loadAll().entries[0]
+        e.archivedAt = Date()
+        try vault.save(e)
+        let changed = ["a.test (u),https://a.test/,u,pw2,,"]
+        try AppleImport.apply(AppleImport.plan(try AppleImport.parse(csv(changed)).logins,
+                                               existing: try vault.loadAll().entries), to: vault)
+        XCTAssertTrue(try vault.loadAll().entries[0].isArchived)
+    }
+
     func testOldRecordsStillDecode() throws {
         var e = Entry(type: .login, title: "t")
         e[field: "username"] = "u"

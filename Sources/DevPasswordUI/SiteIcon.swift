@@ -10,7 +10,9 @@ struct SiteIcon: View {
     var size: CGFloat = 22
 
     var body: some View {
-        if let symbol = SiteLogos.genericSymbol(for: entry) {
+        if let pasted = model.customLogos[entry.id] {
+            logoImage(pasted)
+        } else if let symbol = SiteLogos.genericSymbol(for: entry) {
             GenericTile(symbol: symbol, size: size)
         } else {
             logoOrTile
@@ -21,14 +23,7 @@ struct SiteIcon: View {
         let host = model.logoHost(for: entry)
         if host != nil || (entry.type == .login && entry.icon == nil) {
             if let host, let img = model.logo(for: host) {
-                Image(nsImage: img)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(width: size, height: size)
-                    .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08)))
+                logoImage(img)
             } else {
                 LetterTile(text: host ?? tileText, size: size)
             }
@@ -39,11 +34,54 @@ struct SiteIcon: View {
         }
     }
 
-    /// The site name if there is one, else the title.
-    private var tileText: String {
-        let h = AppleImport.host(entry.urls.first ?? "")
-        return h.isEmpty ? entry.title : h
+    private func logoImage(_ img: NSImage) -> some View {
+        Image(nsImage: img)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08)))
     }
+
+    /// The site name if there is one, else the title.
+    private var tileText: String { SiteIcon.tileText(entry) }
+
+    static func tileText(_ e: Entry) -> String {
+        let h = AppleImport.host(e.urls.first ?? "")
+        return h.isEmpty ? e.title : h
+    }
+
+    /// The main colour of a logo: the average of its coloured pixels, ignoring white, near-black
+    /// and transparent ones (a white BA logo with a red and blue swoosh gives its red-blue).
+    static func dominantColour(_ img: NSImage) -> Color? {
+        guard let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let side = 24
+        var px = [UInt8](repeating: 0, count: side * side * 4)
+        // The buffer must stay valid while the context draws into it: keep both inside one closure.
+        let drawn: Bool = px.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: side, height: side, bitsPerComponent: 8,
+                                      bytesPerRow: side * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return true
+        }
+        guard drawn else { return nil }
+        var r = 0.0, g = 0.0, b = 0.0, n = 0.0
+        for i in stride(from: 0, to: px.count, by: 4) {
+            let a = Double(px[i + 3]) / 255
+            guard a > 0.5 else { continue }
+            let pr = Double(px[i]) / 255 / a, pg = Double(px[i + 1]) / 255 / a, pb = Double(px[i + 2]) / 255 / a
+            let mx = max(pr, pg, pb), mn = min(pr, pg, pb)
+            guard mx - mn > 0.15 else { continue }   // skip white, grey and black
+            r += pr; g += pg; b += pb; n += 1
+        }
+        guard n >= 4 else { return nil }
+        return Color(red: r / n, green: g / n, blue: b / n)
+    }
+
 }
 
 /// First letter on a colour chosen from the text, so the same site always gets the same colour.

@@ -254,6 +254,12 @@ public struct Entry: Codable, Identifiable, Hashable {
     /// Website whose logo this record shows, set by Nino (decision 0009), e.g. "bosch.com".
     /// devPassword's own field: never touched by an import. Works on any record type.
     public var logoSite: String?
+    /// A picture Nino pasted as this record's logo, already shrunk to a small PNG
+    /// (SiteLogos.normalisePasted). Sealed with the record and carried by backups. Wins over everything.
+    public var customLogo: Data?
+    /// Set when Nino archives the record: old but kept. Out of every list, count and search
+    /// except the Archive list. devPassword's own field: imports never change it.
+    public var archivedAt: Date?
 
     public init(id: UUID = UUID(), type: RecordType, title: String = "") {
         self.id = id
@@ -281,6 +287,7 @@ public struct Entry: Codable, Identifiable, Hashable {
     }
 
     public var isDeleted: Bool { deletedAt != nil }
+    public var isArchived: Bool { archivedAt != nil }
 
     /// The title to show. Apple-imported logins titled with a bare web address lose a leading
     /// "www.", "account.", "accounts.", "login." or "signin.", so account.bbc.com shows as bbc.com.
